@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>社交教练 · 实时对话式社交辅助工具</title>
+<meta name="description" content="面向大学新生的实时对话式社交教练：社交前准备、社交中应急、社交后复盘、社交能力成长档案。数据默认只存在本机，登录后可同步到自己的账号。">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app">
+
+  <header class="topbar">
+    <div class="brand-mark">◎</div>
+    <div>
+      <h1>社交教练</h1>
+      <div class="sub">实时对话式社交辅助 · v1.0</div>
+    </div>
+    <button class="privacy-chip" id="privacyChip" title="点击查看数据去向">
+      <span class="dot"></span>数据默认只存本机
+    </button>
+  </header>
+
+  <main class="main">
+
+    <!-- ============ 社交前准备 ============ -->
+    <section class="panel active" id="panel-prep">
+      <div class="chat" id="chat" aria-live="polite"></div>
+
+      <div class="composer">
+        <div class="suggest" id="suggest"></div>
+        <div class="composer-inner">
+          <textarea id="input" rows="1" placeholder="说说待会儿要面对的场景，比如：8 人聚餐，其中两个不太熟"></textarea>
+          <button class="btn" id="sendBtn">发送</button>
+        </div>
+      </div>
+      <p class="footer-note">准备流程控制在 3 分钟以内 · 30 秒版本 + 可直接念的话</p>
+    </section>
+
+    <!-- ============ 社交中应急 ============ -->
+    <section class="panel" id="panel-sos">
+      <div class="card">
+        <div class="card-title-row">
+          <h2>现在发生了什么</h2>
+          <span class="tag">1 次点击给答案</span>
+        </div>
+        <p class="hint">选一个最接近的，马上给你一句可以直接念出口的话。</p>
+        <div class="sos-grid mt-10" id="sosGrid"></div>
+      </div>
+      <div id="sosResult">
+        <div class="card"><div class="emergency-empty">还没有内容。上面选一个，或用文字回到「准备」里直接说。</div></div>
+      </div>
+    </section>
+
+    <!-- ============ 社交后复盘 ============ -->
+    <section class="panel" id="panel-review">
+      <div class="card">
+        <h2>结构化复盘</h2>
+        <p class="hint">把"事后反刍"变成一条可复用的经验。填写时间约 1 分钟。</p>
+      </div>
+      <form class="card" id="reviewForm">
+        <div class="field">
+          <label for="rvScene">场景</label>
+          <select id="rvScene"></select>
+        </div>
+        <div class="field">
+          <label for="rvLevel">当时的焦虑程度</label>
+          <div class="slider-row">
+            <input type="range" id="rvLevel" min="1" max="5" step="1" value="3">
+            <span class="lv-badge" id="rvLevelBadge">3/5 明显紧张</span>
+          </div>
+        </div>
+        <div class="field">
+          <label>触发点（可多选）</label>
+          <div class="chips" id="rvTriggers"></div>
+        </div>
+        <div class="field">
+          <label for="rvAction">我做了什么</label>
+          <textarea id="rvAction" placeholder="例：先说了一句兜底的话，然后把话题交给对方"></textarea>
+        </div>
+        <div class="field">
+          <label>效果</label>
+          <div class="chips" id="rvEffect"></div>
+        </div>
+        <div class="field">
+          <label for="rvNext">下次想换的一个小动作（只写一个）</label>
+          <textarea id="rvNext" placeholder="例：提前写好饭后离场的理由"></textarea>
+        </div>
+        <div class="row-between">
+          <button class="btn" type="submit">完成复盘</button>
+          <button class="btn ghost small" type="button" id="rvDemo">填一份示例</button>
+        </div>
+      </form>
+      <div id="reviewResult"></div>
+    </section>
+
+    <!-- ============ 成长档案 ============ -->
+    <section class="panel" id="panel-me">
+      <div class="card">
+        <div class="card-title-row">
+          <h2>我的社交画像</h2>
+          <span class="tag" id="tendencyTag">未设置</span>
+        </div>
+        <p class="hint">性格倾向只用于调整建议的语气与节奏，不会强制填写、也不会用于任何评分。</p>
+        <div class="chips mt-8" id="tendencyChips"></div>
+      </div>
+
+      <div class="card">
+        <h2>社交能力成长曲线</h2>
+        <p class="hint">焦虑等级按复盘记录绘制，用来看到进步，而不是给你打分。</p>
+        <div class="chart-box" id="chartBox"></div>
+        <div class="stat-grid" id="statGrid"></div>
+      </div>
+
+      <div class="card">
+        <h2>我的策略库</h2>
+        <p class="hint">复盘中标记为"有效"的做法会自动存进来，下次同类场景直接调用。</p>
+        <div id="strategyBox"></div>
+      </div>
+
+      <div class="card">
+        <div class="row-between">
+          <h2>隐私与数据</h2>
+          <span class="mode-pill" id="modePill">本地规则引擎</span>
+        </div>
+        <ul class="privacy-list">
+          <li>不登录时：所有内容只写进这台设备的 localStorage，不上传、不需要注册</li>
+          <li>不采集身份信息，不要求手机号或邮箱，也不要求填写心理量表</li>
+          <li>可以随时导出或一键清空本机数据</li>
+          <li>登录后：复盘的明文副本会保存在你自己的账号下，仅凭密码可读取；请勿上传你不希望被服务器保存的内容</li>
+        </ul>
+        <div class="row-between mt-11">
+          <button class="btn ghost small" id="exportBtn">导出 JSON</button>
+          <button class="btn ghost small" id="clearBtn">清空本机数据</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="row-between">
+          <h2>云端同步</h2>
+          <span class="mode-pill" id="cloudPill">仅本机</span>
+        </div>
+        <p class="hint" id="cloudHint">未登录时所有数据只在这台设备上。注册账号后可以把复盘同步到云端，换设备也能接着用。</p>
+
+        <form id="cloudForm" class="mt-10">
+          <div class="field">
+            <label for="cloudUser">昵称</label>
+            <input type="text" id="cloudUser" autocomplete="username" placeholder="2–24 个汉字/字母/数字">
+          </div>
+          <div class="field">
+            <label for="cloudPass">密码</label>
+            <input type="password" id="cloudPass" autocomplete="current-password" placeholder="至少 8 位">
+          </div>
+          <div class="row-between">
+            <button class="btn small" type="submit" id="cloudLogin">登录</button>
+            <button class="btn ghost small" type="button" id="cloudRegister">注册新账号</button>
+          </div>
+        </form>
+
+        <div id="cloudSignedIn" class="hidden">
+          <p class="line" id="cloudWho"></p>
+          <p class="hint" id="cloudSyncInfo"></p>
+          <label class="checkline"><input type="checkbox" id="cloudAuto" checked> 自动同步（每次复盘后）</label>
+          <div class="row-between mt-10">
+            <button class="btn small" id="cloudSyncBtn">立即同步</button>
+            <button class="btn ghost small" id="cloudLogout">退出登录</button>
+          </div>
+          <details class="more">
+            <summary>修改密码 / 删除账号与云端数据</summary>
+            <div class="field">
+              <label for="cloudOldPass">当前密码</label>
+              <input type="password" id="cloudOldPass" autocomplete="current-password">
+            </div>
+            <div class="field">
+              <label for="cloudNewPass">新密码</label>
+              <input type="password" id="cloudNewPass" autocomplete="new-password" placeholder="至少 8 位">
+            </div>
+            <div class="row-between">
+              <button class="btn ghost small" id="cloudChangePass">修改密码</button>
+              <button class="btn ghost small danger-text" id="cloudDelete">删除账号</button>
+            </div>
+          </details>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="row-between">
+          <h2>大模型模式</h2>
+          <span class="mode-pill" id="llmPill">检查中…</span>
+        </div>
+        <p class="hint">API Key 只配置在服务器上（环境变量 LLM_API_KEY），浏览器里永远不保存密钥。
+          服务器未配置或调用失败时，自动使用本地规则引擎，功能不中断。</p>
+      </div>
+
+      <p class="footer-note">规则引擎话术为预设内容，不构成心理或医疗建议。</p>
+    </section>
+
+  </main>
+
+  <nav class="navbar">
+    <div class="nav-inner">
+      <button class="nav-btn active" data-tab="prep"><span class="ico">🗣️</span>准备</button>
+      <button class="nav-btn" data-tab="sos"><span class="ico">🆘</span>应急</button>
+      <button class="nav-btn" data-tab="review"><span class="ico">🪞</span>复盘</button>
+      <button class="nav-btn" data-tab="me"><span class="ico">📈</span>档案</button>
+    </div>
+  </nav>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="coach-engine.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
