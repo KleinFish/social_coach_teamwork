@@ -1,0 +1,41 @@
+# Render 一键部署蓝图
+#
+# 重要：Render 免费实例的文件系统是**临时**的（15 分钟无访问即休眠，重启清空），
+# 所以这里不使用磁盘，而是把数据放到外部免费 Redis（Upstash）。
+# 部署时 Render 会提示你填写 UPSTASH_REDIS_REST_URL 与 UPSTASH_REDIS_REST_TOKEN。
+#
+# 如果你改用付费实例（Starter 起）并挂载磁盘，可以删掉那两个 UPSTASH_* 变量，
+# 改回 DATA_DIR=/var/data 并启用下面的 disk 段，即可继续使用本地 SQLite。
+services:
+  - type: web
+    name: social-coach
+    runtime: node
+    plan: free
+    region: singapore
+    buildCommand: npm install
+    startCommand: node server.js
+    healthCheckPath: /api/health
+    envVars:
+      - key: HOST
+        value: 0.0.0.0
+      - key: SECURE_COOKIES
+        value: "1"
+      - key: TRUST_PROXY
+        value: "1"
+      # 外部持久化存储（必填，部署时粘贴 Upstash 控制台里的 REST 地址与令牌）
+      - key: UPSTASH_REDIS_REST_URL
+        sync: false
+      - key: UPSTASH_REDIS_REST_TOKEN
+        sync: false
+      # 可选：大模型模式，不填则使用本地规则引擎
+      - key: LLM_ENDPOINT
+        sync: false
+      - key: LLM_MODEL
+        sync: false
+      - key: LLM_API_KEY
+        sync: false
+    # ↓ 仅付费实例可用；使用上面的 UPSTASH_* 时请保持注释
+    # disk:
+    #   name: social-coach-data
+    #   mountPath: /var/data
+    #   sizeGB: 1
