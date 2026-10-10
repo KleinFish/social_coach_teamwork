@@ -327,8 +327,54 @@
   }
 
   /* ------------------------------------------------------------------ *
-   * 五、回复构造（对话式，块状输出，前端按块渲染）
+   * 元问题识别：本地规则引擎只会按社交场景给建议。
+   * 如果用户问的是产品本身（"接大模型了吗""收费吗""怎么用"），
+   * 必须老实说自己答不好，而不是硬凑一个"最接近的场景"。
    * ------------------------------------------------------------------ */
+  var META_STRONG = ['大模型', '接入', 'api', '密钥', '收费', '付费', '隐私', '数据安全', '前端', '后端',
+    '代码', '部署', '服务器', '离线', '你们', '这个产品', '这个工具', '为什么', '原理', '好用',
+    '怎么用', '怎么玩', '准确率', '智能', '答非所问', '胡说'];
+  var META_WEAK = ['是不是', '能不能', '支持吗', '有吗', '会吗', '吗', '呢', '对吧'];
+
+  /**
+   * 判断是不是"产品/元问题"。只在**没有任何场景命中**时调用，
+   * 所以这里可以放宽：没有场景 + 是个问句 → 就老实说答不好，而不是硬猜场景。
+   */
+  function looksLikeMeta(raw) {
+    var s = String(raw == null ? '' : raw);
+    var hay = norm(s);
+    for (var i = 0; i < META_STRONG.length; i++) {
+      if (hay.indexOf(norm(META_STRONG[i])) >= 0) return true;
+    }
+    var weak = 0;
+    for (var j = 0; j < META_WEAK.length; j++) {
+      if (hay.indexOf(norm(META_WEAK[j])) >= 0) weak += 1;
+    }
+    if (weak >= 2) return true;
+    var isQuestion = /[?？]/.test(s) || /(吗|呢|对吧|了没|了吗)\s*$/.test(s.trim());
+    return isQuestion;
+  }
+
+  function metaBlocks() {
+    return [
+      {
+        type: 'empathy',
+        text: '说实话，这个问题我答不好——我目前跑的是本地规则引擎（没有接入大模型），只会按社交场景给建议，听不懂产品问题。'
+      },
+      {
+        type: 'checklist',
+        title: '我能帮上的部分',
+        items: [
+          '想练某个具体场景，直接说类似「明天上午面试」「8 人聚餐，其中两个不太熟」',
+          '已经结束了想整理，去「复盘」页记一条',
+          '现在正卡住，切到「应急」点一个按钮，会给你一句能直接念的话'
+        ],
+        hint: '（如果希望用大模型来聊，部署时在服务器配置 LLM_API_KEY，配置后这类问题就交给大模型回答。）'
+      }
+    ];
+  }
+
+
   function empathyLine(emotion) {
     if (!emotion.labels.length) return '这种情况很多人都会紧一下，你能提前来想这件事，本身就已经在处理它了。';
     var map = {
@@ -349,6 +395,10 @@
     if (crisis) return { blocks: [CRISIS_BLOCK], crisis: true };
 
     var found = detectScenes(text, 3);
+    // 产品/元问题：不走"猜场景"的老路，避免一本正经地胡说八道
+    if (!found.length && looksLikeMeta(text)) {
+      return { blocks: metaBlocks(), meta: true };
+    }
     var scene = found.length ? found[0].scene : getScene('party-strangers');
     var guess = !found.length;
     var emotion = detectEmotions(text);
@@ -669,8 +719,10 @@
       strategies: reviews.filter(function (r) { return r.effect === 'good' && r.action; })
         .map(function (r) { return { sceneId: r.sceneId, sceneName: r.sceneName, action: r.action, at: r.at }; }),
       assessment: assessment,
-      createdAt: (a.createdAt && b.createdAt && a.createdAt > b.createdAt ? b.createdAt : a.createdAt) || new Date().toISOString(),
-      updatedAt: (a.updatedAt > b.updatedAt ? a.updatedAt : b.updatedAt) || new Date().toISOString()
+      // 时间字段一律取自入参，不再回落到当前时间：同一份输入合并两次必须得到完全相同的结果，
+      // 否则前端会误判"远端变了"从而多余上传（这里曾被测试抓出过一次）
+      createdAt: (a.createdAt && b.createdAt) ? (a.createdAt > b.createdAt ? b.createdAt : a.createdAt) : (a.createdAt || b.createdAt || ''),
+      updatedAt: (a.updatedAt > b.updatedAt ? a.updatedAt : b.updatedAt) || ''
     };
   }
 
@@ -697,6 +749,8 @@
     soften: soften,
     pick: pick,
     detectScenes: detectScenes,
+    looksLikeMeta: looksLikeMeta,
+    metaBlocks: metaBlocks,
     getScene: getScene,
     estimatePressure: estimatePressure,
     detectEmotions: detectEmotions,

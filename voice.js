@@ -58,7 +58,7 @@
       'no-speech': '没有听到声音，靠近一点再说一次？',
       'audio-capture': '没有找到可用的麦克风。',
       'network': '语音识别服务连不上（可能是网络问题）。可以直接手动输入。',
-      'aborted': '已取消语音输入。',
+      'aborted': '语音识别被中断了（微信等内置浏览器常限制这个能力）。可以再点一次试试，或直接手动输入。',
       'unsupported': '当前环境不支持语音输入，手动输入就好。',
       'server-not-configured': '服务器还没有配置语音转写，暂时只能手动输入。',
       'too-large': '这段录音太长了，说短一点再试（建议 30 秒内）。',
@@ -109,15 +109,34 @@
     var timer = null;
     var session = {
       mode: mode,
-      stop: function () { stopped = true; cleanup(); }
+      /** 用户主动结束：优雅停止（把已识别到的内容交出来），而不是丢弃 */
+      stop: function () { stopped = true; gracefulStop(); }
     };
 
     function state(s) { if (o.onState) o.onState(s); }
     function fail(code) { if (o.onError) o.onError(code, mapError(code)); }
 
-    function cleanup() {
-      if (timer) { clearTimeout(timer); timer = null; }
-      if (session._abort) { try { session._abort(); } catch (e) { /* ignore */ } }
+    function cleanup() { if (timer) { clearTimeout(timer); timer = null; } }
+
+    function gracefulStop() {
+      cleanup();
+      if (mode === 'browser') {
+        try { if (rec) rec.stop(); }
+        catch (e) { try { if (rec) rec.abort(); } catch (e2) { /* ignore */ } }
+      } else if (mode === 'server') {
+        var stoppedRecorder = false;
+        try {
+          if (mr && mr.state !== 'inactive') { mr.stop(); stoppedRecorder = true; }
+        } catch (e) { /* ignore */ }
+        // 录音器没在跑（或已被停止）时，直接释放麦克风
+        if (!stoppedRecorder && stream) stream.getTracks().forEach(function (t) { t.stop(); });
+      }
+    }
+
+    /** 仅在需要彻底释放麦克风时使用 */
+    function releaseAll() {
+      cleanup();
+      try { if (stream) stream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) { /* ignore */ }
     }
 
     // 最长录音时长，避免忘了点停止（默认 60 秒）
@@ -130,9 +149,8 @@
     }
 
     if (mode === 'browser') {
-      var SR = w.SpeechRecognition || w.webkitSpeechRecognition;
-      if (!SR) { fail('unsupported'); return session; }
-      var rec = new SR();
+      var rec = (w.SpeechRecognition || w.webkitSpeechRecognition) ? new (w.SpeechRecognition || w.webkitSpeechRecognition)() : null;
+      if (!rec) { fail('unsupported'); return session; }
       var finalText = '';
       rec.lang = lang;
       rec.interimResults = true;
@@ -148,14 +166,18 @@
         if (finals) finalText += finals;
         if (o.onPartial) o.onPartial((finalText + interim).trim());
       };
-      rec.onerror = function (ev) { fail((ev && ev.error) || 'transcribe-failed'); };
+      rec.onerror = function (ev) {
+        var code = (ev && ev.error) || 'transcribe-failed';
+        // 用户主动停止时会抛 aborted —— 这不是错误，按正常结束处理
+        if (stopped && (code === 'aborted' || code === 'no-speech')) { return; }
+        fail(code);
+      };
       rec.onend = function () {
         cleanup();
-        if (stopped && !finalText) { state('idle'); return; }
         state('idle');
-        if (o.onFinal) o.onFinal(finalText.trim());
+        if (o.onFinal) o.onFinal(finalText.trim());   // 空文本也交出去，让上层给出"没听到内容"的反馈
       };
-      session._abort = function () { try { rec.abort(); } catch (e) { /* ignore */ } };
+      session._release = releaseAll;
       state('recording');
       try { rec.start(); } catch (e) { fail('unsupported'); }
       return session;
@@ -196,10 +218,7 @@
       mr.start();
     }).catch(function () { state('idle'); fail('not-allowed'); });
 
-    session._abort = function () {
-      try { if (mr && mr.state !== 'inactive') mr.stop(); } catch (e) { /* ignore */ }
-      try { if (stream) stream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) { /* ignore */ }
-    };
+    session._release = releaseAll;
     return session;
   }
 

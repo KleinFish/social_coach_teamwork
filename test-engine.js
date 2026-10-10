@@ -126,6 +126,10 @@ const dup = E.mergeProfiles(localOnly, localOnly);
 ok('相同记录不会重复计入', dup.reviews.length === 1 && dup.strategies.length === 1, JSON.stringify(dup.reviews.length));
 ok('合并不修改入参', localOnly.reviews.length === 1 && remoteOnly.reviews.length === 1);
 ok('sameProfile 能识别等价画像', E.sameProfile(merged, E.mergeProfiles(remoteOnly, localOnly)) === true);
+ok('合并结果完全确定（连续两次合并逐字节相同）',
+  JSON.stringify(E.mergeProfiles(localOnly, remoteOnly)) === JSON.stringify(E.mergeProfiles(localOnly, remoteOnly)));
+ok('缺失时间字段时不回落到当前时间',
+  E.mergeProfiles({ reviews: [] }, { reviews: [] }).updatedAt === '');
 ok('sameProfile 能识别差异', E.sameProfile(localOnly, remoteOnly) === false);
 
 /* 12. 社交画像（测试结果）的校验与合并 */
@@ -183,6 +187,26 @@ ok('预测中等时给出中等口径', /属于中等/.test(prepMid.blocks[1].se
 ok('分档口径与量表一致（>3.5 为偏吃力）',
   /偏吃力/.test(E.buildPrepReply('开会发言', null, { selfCheckDifficulty: 3.6 }).blocks[1].selfCheck) &&
   !/偏吃力/.test(E.buildPrepReply('开会发言', null, { selfCheckDifficulty: 3.5 }).blocks[1].selfCheck));
+
+/* 13. 元问题识别：不再"一本正经地胡说八道" */
+section('产品/元问题识别');
+ok('"你们接大模型了吗"被识别为元问题', E.looksLikeMeta('你们接大模型了吗') === true);
+ok('"这个产品收费吗？"被识别为元问题', E.looksLikeMeta('这个产品收费吗？') === true);
+ok('"这个怎么用？"被识别为元问题', E.looksLikeMeta('这个怎么用？') === true);
+ok('"离线能用吗？"被识别为元问题', E.looksLikeMeta('离线能用吗？') === true);
+ok('用户原话"所以PC端还是能自动支持的对吧？"被识别为元问题',
+  E.looksLikeMeta('所以PC端还是能自动支持的对吧？') === true);
+ok('无场景命中的问句都按元问题处理', E.looksLikeMeta('这个支持离线吗') === true);
+ok('场景描述不会被误判', E.looksLikeMeta('明天上午面试') === false && E.looksLikeMeta('8 人聚餐，其中两个不太熟') === false);
+ok('模糊描述也不会被误判（交给场景猜测）', E.looksLikeMeta('有点紧张') === false);
+const metaReply = E.buildPrepReply('所以PC端还是能自动支持的对吧？', null);
+ok('元问题返回 meta 标记', metaReply.meta === true);
+ok('元问题回复里说明自己没接大模型', /本地规则引擎/.test(JSON.stringify(metaReply.blocks)));
+ok('元问题回复给出可用的引导', /我能帮上的部分/.test(JSON.stringify(metaReply.blocks)));
+ok('元问题不再编造场景预测', !/我先按最接近的场景/.test(JSON.stringify(metaReply.blocks)));
+ok('元问题回复不含"你应该"', JSON.stringify(metaReply.blocks).indexOf('你应该') === -1);
+const normalReply = E.buildPrepReply('明天上午面试，有点紧张', null);
+ok('正常场景仍走完整准备流程', !normalReply.meta && normalReply.blocks.length >= 6);
 
 console.log('\n结果：' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

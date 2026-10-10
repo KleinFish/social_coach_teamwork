@@ -16,7 +16,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 class FakeSR {
   constructor() { FakeSR.last = this; this.lang = ''; this.interimResults = false; this.continuous = true; }
   start() { this.started = true; }
-  abort() { this.aborted = true; if (this.onend) this.onend(); }
+  /** 模拟浏览器：stop() 是优雅结束，会触发 onend（把已识别的内容交出来） */
+  stop() { this.stopped = true; if (this.onend) this.onend(); }
+  /** 模拟浏览器：abort() 会抛 aborted 错误 */
+  abort() { this.aborted = true; if (this.onerror) this.onerror({ error: 'aborted' }); if (this.onend) this.onend(); }
   emitResults(list) { this.onresult({ resultIndex: 0, results: list }); }
   end() { if (this.onend) this.onend(); }
 }
@@ -108,8 +111,24 @@ function makeEnv(opts) {
   const s2 = V.createSession(makeEnv(), { mode: 'browser', onError: (c) => errors.push(c) });
   FakeSR.last.onerror({ error: 'not-allowed' });
   ok('识别错误被归类', errors[errors.length - 1] === 'not-allowed');
-  s2.stop();
-  ok('stop() 会中止识别', FakeSR.last.aborted === true);
+
+  /* 关键回归：用户主动停止不应被当成错误，而且已识别到的文字要保留（手机端曾因此丢字并弹"已取消"） */
+  let stopFinals = [], stopErrors = [];
+  const sStop = V.createSession(makeEnv(), {
+    mode: 'browser',
+    onFinal: (t) => stopFinals.push(t),
+    onError: (c) => stopErrors.push(c)
+  });
+  FakeSR.last.emitResults([{ isFinal: true, 0: { transcript: '我有点紧张' } }]);
+  sStop.stop();
+  ok('主动停止会把已识别到的文字交出来', stopFinals[stopFinals.length - 1] === '我有点紧张',
+    JSON.stringify(stopFinals));
+  ok('主动停止走的是优雅停止（stop 而非 abort）', FakeSR.last.stopped === true && !FakeSR.last.aborted);
+  ok('主动停止不会报 aborted 错误', stopErrors.indexOf('aborted') === -1, JSON.stringify(stopErrors));
+
+  const sAbort = V.createSession(makeEnv(), { mode: 'browser', onError: (c) => stopErrors.push(c) });
+  FakeSR.last.onerror({ error: 'aborted' });      // 非用户触发的中断
+  ok('非用户触发的 aborted 仍会如实上报', stopErrors.indexOf('aborted') !== -1, JSON.stringify(stopErrors));
   s1.stop();
 
   section('服务端转写通道');
