@@ -8,6 +8,7 @@
   'use strict';
 
   var E = window.CoachEngine;
+  var Assess = window.SocialAssessment;
   var PROFILE_KEY = 'social-coach.profile.v1';
   var CLOUD_KEY = 'social-coach.cloud.v1';
 
@@ -74,6 +75,7 @@
     for (i = 0; i < panels.length; i++) panels[i].classList.toggle('active', panels[i].id === 'panel-' + tab);
     if (tab === 'me') renderMe();
     if (tab === 'review') renderReviewStage();
+    if (tab === 'test') renderTestPanel();
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
   for (var n = 0; n < navBtns.length; n++) {
@@ -209,6 +211,7 @@
           box.appendChild(el('div', 'soft-note', '也可能是：' + b.alternatives.join(' / ') + '（点下方场景按钮可以换）'));
         }
         if (b.note) box.appendChild(el('div', 'soft-note', b.note));
+        if (b.selfCheck) box.appendChild(el('div', 'soft-note', b.selfCheck));
         return box;
 
       case 'reframe':
@@ -460,7 +463,7 @@
           }]
         };
       }
-      return E.buildPrepReply(text, profile);
+      return E.buildPrepReply(text, profile, { selfCheckDifficulty: selfCheckDifficultyFor(text) });
     }
 
     var local = localReply();
@@ -507,13 +510,27 @@
   function renderSosGrid() {
     var grid = $('#sosGrid');
     grid.innerHTML = '';
+    var rec = null;
+    var dims = assessmentDims();
+    if (dims) rec = Assess.recommendEmergency(dims);
     E.EMERGENCY.forEach(function (t) {
       var b = el('button', 'sos-btn');
-      b.appendChild(el('strong', null, t.name));
+      var strong = el('strong', null, t.name);
+      if (t.id === rec) strong.appendChild(el('span', 'rec', '画像推荐'));
+      b.appendChild(strong);
       b.appendChild(el('span', null, t.sub));
       b.addEventListener('click', function () { showEmergency(t.id); });
       grid.appendChild(b);
     });
+    var box = $('#sosHintBox');
+    if (box) box.innerHTML = '';
+    if (rec && box) {
+      var meta = E.EMERGENCY.filter(function (t) { return t.id === rec; })[0];
+      var r = rankInfo();
+      box.appendChild(el('div', 'sos-hint', '你的自测画像里最需要先练的是「' +
+        (r.weakest.length ? r.weakest[0].name : '临场应变') + '」，已用"画像推荐"标出最相关的一键入口' +
+        (meta ? '（' + meta.name + '）' : '') + '，先把那句话背下来。'));
+    }
   }
   function showEmergency(id) {
     var r = E.buildEmergencyReply(id, profile);
@@ -614,6 +631,383 @@
     $('#rvNext').value = '';
   });
 
+  /* ---------------- 社交画像测试 ---------------- */
+  var QUIZ_PAGE_SIZE = 8;
+  var quiz = { page: 0, answers: {}, active: false };
+
+  function assessmentDims() {
+    var a = profile.assessment;
+    return (a && a.dimensions) ? a.dimensions : null;
+  }
+  function rankInfo() {
+    var dims = assessmentDims();
+    return dims ? Assess.rankDimensions(dims) : { sorted: [], strongest: [], weakest: [] };
+  }
+  function currentPredictions() {
+    var dims = assessmentDims();
+    return dims ? Assess.predictScenes(dims, E.SCENES) : null;
+  }
+  /** 给「准备」模块用：这个场景在用户自评里的预测难度 */
+  function selfCheckDifficultyFor(text) {
+    var preds = currentPredictions();
+    if (!preds) return null;
+    var found = E.detectScenes(text, 1);
+    if (!found.length) return null;
+    var hit = preds.filter(function (p) { return p.id === found[0].scene.id; })[0];
+    return hit ? hit.difficulty : null;
+  }
+
+  function showQuizUI(active) {
+    $('#testIntro').classList.toggle('hidden', active);
+    $('#testQuiz').classList.toggle('hidden', !active);
+    $('#testResult').classList.toggle('hidden', active);
+  }
+
+  function renderTestPanel() {
+    var last = profile.assessment && profile.assessment.at;
+    $('#testLastTime').textContent = last ? ('上次测试：' + new Date(last).toLocaleString('zh-CN')) : '';
+    if (quiz.active) { showQuizUI(true); renderQuizPage(); return; }
+    showQuizUI(false);
+    renderTestResult(profile.assessment);
+  }
+
+  function startQuiz() {
+    quiz.active = true;
+    quiz.page = 0;
+    quiz.answers = {};
+    showQuizUI(true);
+    renderQuizPage();
+  }
+
+  function renderQuizPage() {
+    var total = Assess.ITEMS.length;
+    var pages = Math.ceil(total / QUIZ_PAGE_SIZE);
+    var start = quiz.page * QUIZ_PAGE_SIZE;
+    var items = Assess.ITEMS.slice(start, start + QUIZ_PAGE_SIZE);
+    var host = $('#testQuestions');
+    host.innerHTML = '';
+    items.forEach(function (it, idx) {
+      var wrap = el('div', 'q-item');
+      var qt = el('div', 'q-text');
+      qt.appendChild(el('span', 'q-no', 'Q' + (start + idx + 1)));
+      qt.appendChild(el('span', null, it.text));
+      wrap.appendChild(qt);
+      var opts = el('div', 'q-opts');
+      Assess.LIKERT.forEach(function (o) {
+        var b = el('button', 'q-opt' + (quiz.answers[it.id] === o.value ? ' on' : ''), o.label);
+        b.addEventListener('click', function () {
+          quiz.answers[it.id] = o.value;
+          var sibs = opts.querySelectorAll('.q-opt');
+          for (var s = 0; s < sibs.length; s++) sibs[s].classList.remove('on');
+          b.classList.add('on');
+          updateQuizNav();
+        });
+        opts.appendChild(b);
+      });
+      wrap.appendChild(opts);
+      host.appendChild(wrap);
+    });
+    updateQuizNav();
+  }
+
+  function updateQuizNav() {
+    var total = Assess.ITEMS.length;
+    var pages = Math.ceil(total / QUIZ_PAGE_SIZE);
+    var lastPage = quiz.page >= pages - 1;
+    var pageItems = Assess.ITEMS.slice(quiz.page * QUIZ_PAGE_SIZE, quiz.page * QUIZ_PAGE_SIZE + QUIZ_PAGE_SIZE);
+    var answeredOnPage = pageItems.every(function (it) { return quiz.answers[it.id]; });
+    var answeredAll = Assess.ITEMS.every(function (it) { return quiz.answers[it.id]; });
+    $('#testBar').style.width = Math.round(((quiz.page + (answeredOnPage ? 1 : 0.5)) / pages) * 100) + '%';
+    $('#testCount').textContent = '第 ' + (quiz.page + 1) + ' / ' + pages + ' 页 · 已答 ' +
+      Assess.ITEMS.filter(function (it) { return quiz.answers[it.id]; }).length + ' / ' + total;
+    $('#testPrev').disabled = quiz.page === 0;
+    $('#testNext').textContent = lastPage ? '提交并生成画像' : '下一页';
+    $('#testNext').disabled = lastPage ? !answeredAll : !answeredOnPage;
+  }
+
+  function submitQuiz() {
+    var missing = Assess.ITEMS.filter(function (it) { return !quiz.answers[it.id]; });
+    if (missing.length) {
+      toast('还有 ' + missing.length + ' 题没作答');
+      quiz.page = Math.floor(Assess.ITEMS.indexOf(missing[0]) / QUIZ_PAGE_SIZE);
+      renderQuizPage();
+      return;
+    }
+    var result = Assess.score(quiz.answers, { scenes: E.SCENES });
+    quiz.active = false;
+    showQuizUI(false);
+    saveAssessment(result);
+    renderTestResult(result);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  /** 只把必要字段写进画像：场景预测是可重算的，不入库，避免两处数据打架 */
+  function saveAssessment(result) {
+    profile.assessment = {
+      version: result.version,
+      at: result.at,
+      answered: result.answered,
+      total: result.total,
+      dimensions: result.dimensions,
+      readiness: result.readiness,
+      tendencyHint: result.tendencyHint,
+      flat: result.flat
+    };
+    var noted = '';
+    if (!profile.tendency && result.tendencyHint) {
+      profile.tendency = result.tendencyHint;
+      noted = '，并把画像倾向设为「' + (result.tendencyHint === 'i' ? '偏内向 i' : '偏外向 e') + '」';
+    }
+    store(PROFILE_KEY, profile);
+    renderSosGrid();
+    renderMe();
+    renderTestPanel();
+    scheduleSync();
+    toast('画像已写入%s，之后「准备」和「应急」会按它调整建议'.replace('%s', noted));
+  }
+
+  function dimBar(name, score) {
+    var li = el('li');
+    li.appendChild(el('span', 'dim-name', name));
+    var bar = el('span', 'dim-bar');
+    var fill = el('i');
+    fill.style.width = (score === null ? 0 : score) + '%';
+    bar.appendChild(fill);
+    li.appendChild(bar);
+    li.appendChild(el('span', 'dim-val', score === null ? '—' : String(score)));
+    return li;
+  }
+
+  /** 八维雷达图（纯 SVG，无第三方库） */
+  function radarSvg(dims) {
+    var list = Assess.DIMENSIONS;
+    var n = list.length, size = 300, cx = size / 2, cy = size / 2 + 4, R = 92;
+    var ns = 'http://www.w3.org/2000/svg';
+    var svg = document.createElementNS(ns, 'svg');
+    svg.setAttribute('viewBox', '0 0 ' + size + ' ' + size);
+
+    [0.25, 0.5, 0.75, 1].forEach(function (k) {
+      var pts = [];
+      for (var i = 0; i < n; i++) {
+        var ang = -Math.PI / 2 + (i * 2 * Math.PI) / n;
+        pts.push((cx + Math.cos(ang) * R * k).toFixed(1) + ',' + (cy + Math.sin(ang) * R * k).toFixed(1));
+      }
+      var poly = document.createElementNS(ns, 'polygon');
+      poly.setAttribute('points', pts.join(' '));
+      poly.setAttribute('fill', 'none');
+      poly.setAttribute('stroke', '#e5e8f0');
+      poly.setAttribute('stroke-width', '1');
+      svg.appendChild(poly);
+    });
+
+    var shape = [];
+    for (var i = 0; i < n; i++) {
+      var ang = -Math.PI / 2 + (i * 2 * Math.PI) / n;
+      var x2 = cx + Math.cos(ang) * R, y2 = cy + Math.sin(ang) * R;
+      var line = document.createElementNS(ns, 'line');
+      line.setAttribute('x1', cx); line.setAttribute('y1', cy);
+      line.setAttribute('x2', x2.toFixed(1)); line.setAttribute('y2', y2.toFixed(1));
+      line.setAttribute('stroke', '#eceff7');
+      svg.appendChild(line);
+
+      var scoreV = (typeof dims[list[i].key] === 'number') ? dims[list[i].key] : 0;
+      shape.push((cx + Math.cos(ang) * R * (scoreV / 100)).toFixed(1) + ',' + (cy + Math.sin(ang) * R * (scoreV / 100)).toFixed(1));
+
+      var tx = cx + Math.cos(ang) * (R + 26), ty = cy + Math.sin(ang) * (R + 22) + 3;
+      var label = document.createElementNS(ns, 'text');
+      label.setAttribute('x', tx.toFixed(1));
+      label.setAttribute('y', ty.toFixed(1));
+      label.setAttribute('font-size', '10.5');
+      label.setAttribute('fill', '#5a6478');
+      var cosA = Math.cos(ang);
+      label.setAttribute('text-anchor', cosA > 0.3 ? 'start' : (cosA < -0.3 ? 'end' : 'middle'));
+      label.textContent = list[i].name + ' ' + (typeof dims[list[i].key] === 'number' ? dims[list[i].key] : '—');
+      svg.appendChild(label);
+    }
+
+    var area = document.createElementNS(ns, 'polygon');
+    area.setAttribute('points', shape.join(' '));
+    area.setAttribute('fill', 'rgba(74,124,246,.18)');
+    area.setAttribute('stroke', '#4a7cf6');
+    area.setAttribute('stroke-width', '2');
+    svg.appendChild(area);
+    return svg;
+  }
+
+  function predCard(p) {
+    var card = el('div', 'pred-item');
+    var top = el('div', 'p-top');
+    top.appendChild(el('span', 'p-name', p.name));
+    var tone = p.band === 'strength' ? 'good' : (p.band === 'challenge' ? 'warn' : (p.band === 'hard' ? 'bad' : ''));
+    top.appendChild(el('span', 'badge ' + tone, p.bandLabel));
+    top.appendChild(el('span', 'p-lv', '预测难度 ' + p.difficulty + '/5'));
+    card.appendChild(top);
+    card.appendChild(el('div', 'p-why', '依据：' + p.reasons.join('；')));
+    card.appendChild(el('div', 'p-tip', '可以先试：' + p.tip));
+    return card;
+  }
+
+  function renderTestResult(result) {
+    var host = $('#testResult');
+    host.innerHTML = '';
+    if (!result || !result.dimensions) {
+      var c0 = el('div', 'card');
+      c0.appendChild(el('p', 'hint', '还没有测试结果。点上面的「开始测试」，40 道题大约 4 分钟。'));
+      host.appendChild(c0);
+      return;
+    }
+
+    var dims = result.dimensions;
+    var rank = Assess.rankDimensions(dims);
+    var preds = Assess.predictScenes(dims, E.SCENES);
+    var split = Assess.splitScenes(preds);
+    var steady = preds.filter(function (p) { return p.band === 'steady'; });
+
+    /* 1. 总览 + 雷达图 */
+    var overview = el('div', 'card');
+    var head = el('div', 'assess-head');
+    var ring = el('div', 'score-ring');
+    ring.style.setProperty('--pct', (result.readiness === null ? 0 : result.readiness) + '%');
+    var inner = el('span');
+    inner.appendChild(el('b', null, result.readiness === null ? '—' : String(result.readiness)));
+    inner.appendChild(el('small', null, '准备度'));
+    ring.appendChild(inner);
+    head.appendChild(ring);
+    var headText = el('div');
+    Assess.summarize(result).forEach(function (t) { headText.appendChild(el('div', 'line', t)); });
+    head.appendChild(headText);
+    overview.appendChild(head);
+
+    var radarBox = el('div', 'radar-box');
+    radarBox.appendChild(radarSvg(dims));
+    overview.appendChild(radarBox);
+
+    var dimList = el('ul', 'dim-list');
+    rank.sorted.forEach(function (d) { dimList.appendChild(dimBar(d.name, d.score)); });
+    overview.appendChild(dimList);
+    overview.appendChild(el('div', 'disclaimer', Assess.DISCLAIMER + ' 测试时间：' + new Date(result.at).toLocaleString('zh-CN') +
+      (result.flat ? '（注意：本次所有题目选了同一档，结果参考价值有限，建议重测）' : '')));
+    host.appendChild(overview);
+
+    /* 2. 维度强弱 */
+    var strengthCard = el('div', 'card');
+    strengthCard.appendChild(el('h2', null, '你的相对优势与短板'));
+    if (rank.strongest.length) {
+      strengthCard.appendChild(el('p', 'hint', '相对有底：' + rank.strongest.map(function (d) { return d.name + '（' + d.score + '）'; }).join('、')));
+    }
+    if (rank.weakest.length) {
+      strengthCard.appendChild(el('p', 'hint', '更需要借力：' + rank.weakest.map(function (d) { return d.name + '（' + d.score + '）'; }).join('、')));
+    }
+    if (rank.weakest.length) {
+      var tip = Assess.DIM_TIPS[rank.weakest[0].key];
+      if (tip) strengthCard.appendChild(el('div', 'sos-hint', '针对最弱项「' + rank.weakest[0].name + '」，可以先做这一件事：' + tip));
+    }
+    host.appendChild(strengthCard);
+
+    /* 3. 场景预测 */
+    var predCardWrap = el('div', 'card');
+    predCardWrap.appendChild(el('h2', null, '场景预测：你更擅长 / 更吃力的场景'));
+    predCardWrap.appendChild(el('p', 'hint', '预测同时考虑这个场景的基准压力（来自访谈的紧张排序）和你的维度得分，数值越低越顺手。'));
+
+    if (split.strengths.length) {
+      var g1 = el('div', 'pred-group good');
+      g1.appendChild(el('div', 'g-head', '较擅长（' + split.strengths.length + ' 个）'));
+      split.strengths.forEach(function (p) { g1.appendChild(predCard(p)); });
+      predCardWrap.appendChild(g1);
+    }
+    if (steady.length) {
+      var g2 = el('div', 'pred-group');
+      g2.appendChild(el('div', 'g-head', '一般（' + steady.length + ' 个）'));
+      steady.forEach(function (p) { g2.appendChild(predCard(p)); });
+      predCardWrap.appendChild(g2);
+    }
+    if (split.challenges.length) {
+      var hard = split.challenges.filter(function (p) { return p.band === 'hard'; });
+      var warnOnly = split.challenges.filter(function (p) { return p.band === 'challenge'; });
+      if (warnOnly.length) {
+        var g3 = el('div', 'pred-group warn');
+        g3.appendChild(el('div', 'g-head', '偏吃力（' + warnOnly.length + ' 个）'));
+        warnOnly.forEach(function (p) { g3.appendChild(predCard(p)); });
+        predCardWrap.appendChild(g3);
+      }
+      if (hard.length) {
+        var g4 = el('div', 'pred-group bad');
+        g4.appendChild(el('div', 'g-head', '很吃力（' + hard.length + ' 个）'));
+        hard.forEach(function (p) { g4.appendChild(predCard(p)); });
+        predCardWrap.appendChild(g4);
+      }
+    } else if (!split.strengths.length && !steady.length) {
+      predCardWrap.appendChild(el('p', 'hint', '本题库暂未覆盖你填写的场景。'));
+    }
+    host.appendChild(predCardWrap);
+
+    /* 4. 下一步 */
+    var next = el('div', 'card');
+    next.appendChild(el('h2', null, '接下来怎么用这份画像'));
+    var ul = el('ul');
+    ul.appendChild(el('li', null, '「准备」里描述场景时，会带上这份画像的预测，偏吃力的场景先做 30 秒状态调整，顺手的场景直接给话术。'));
+    ul.appendChild(el('li', null, '「应急」里已经用"画像推荐"标出最该先背的那一句。'));
+    ul.appendChild(el('li', null, '「复盘」记满几次之后，能看出焦虑曲线和画像是否对得上。'));
+    next.appendChild(ul);
+    var row = el('div', 'row-between mt-10');
+    var again = el('button', 'btn ghost small', '重新测试');
+    again.addEventListener('click', function () { startQuiz(); });
+    var goPrep = el('button', 'btn small', '去准备一个场景');
+    goPrep.addEventListener('click', function () { switchTab('prep'); $('#input').focus(); });
+    row.appendChild(again); row.appendChild(goPrep);
+    next.appendChild(row);
+    host.appendChild(next);
+  }
+
+  function renderAssessmentCard() {
+    var tag = $('#assessTag');
+    var box = $('#assessBox');
+    if (!tag || !box) return;
+    box.innerHTML = '';
+    var a = profile.assessment;
+    if (!a || !a.dimensions) {
+      tag.textContent = '未测试';
+      box.appendChild(el('p', 'hint', '还没有做过社交画像测试。40 道题、约 4 分钟，测完会预测你在哪些场景更顺手。'));
+      var b = el('button', 'btn small', '去做测试');
+      b.addEventListener('click', function () { switchTab('test'); renderTestPanel(); });
+      box.appendChild(b);
+      return;
+    }
+    tag.textContent = '已测试 · ' + new Date(a.at).toLocaleDateString('zh-CN');
+    var rank = Assess.rankDimensions(a.dimensions);
+    var preds = Assess.predictScenes(a.dimensions, E.SCENES);
+    var split = Assess.splitScenes(preds);
+    var radarBox = el('div', 'radar-box');
+    radarBox.appendChild(radarSvg(a.dimensions));
+    box.appendChild(radarBox);
+    var ul = el('ul', 'dim-list');
+    rank.sorted.forEach(function (d) { ul.appendChild(dimBar(d.name, d.score)); });
+    box.appendChild(ul);
+    if (rank.strongest.length) box.appendChild(el('p', 'hint', '相对有底：' + rank.strongest.map(function (d) { return d.name; }).join('、')));
+    if (rank.weakest.length) box.appendChild(el('p', 'hint', '更需要借力：' + rank.weakest.map(function (d) { return d.name; }).join('、')));
+    var good = split.strengths.slice(0, 4).map(function (p) { return p.name; });
+    var bad = split.challenges.slice(0, 4).map(function (p) { return p.name; });
+    if (good.length) box.appendChild(el('p', 'hint', '预测较擅长：' + good.join('、') + '（共 ' + split.strengths.length + ' 个）'));
+    if (bad.length) box.appendChild(el('p', 'hint', '预测偏吃力：' + bad.join('、') + '（共 ' + split.challenges.length + ' 个）'));
+    var row = el('div', 'row-between mt-10');
+    var again = el('button', 'btn ghost small', '重新测试');
+    again.addEventListener('click', function () { switchTab('test'); startQuiz(); });
+    var detail = el('button', 'btn small', '看完整预测');
+    detail.addEventListener('click', function () { switchTab('test'); renderTestPanel(); });
+    row.appendChild(again); row.appendChild(detail);
+    box.appendChild(row);
+  }
+
+  $('#testStart').addEventListener('click', function () { startQuiz(); });
+  $('#testPrev').addEventListener('click', function () {
+    if (quiz.page > 0) { quiz.page -= 1; renderQuizPage(); }
+  });
+  $('#testNext').addEventListener('click', function () {
+    var pages = Math.ceil(Assess.ITEMS.length / QUIZ_PAGE_SIZE);
+    if (quiz.page < pages - 1) { quiz.page += 1; renderQuizPage(); return; }
+    submitQuiz();
+  });
+
   /* ---------------- 成长档案 ---------------- */
   function renderMe() {
     var st = E.stats(profile);
@@ -670,6 +1064,7 @@
     }
     $('#modePill').textContent = cloud.llm ? '大模型模式' : '本地规则引擎';
     $('#modePill').className = 'mode-pill' + (cloud.llm ? ' live' : '');
+    renderAssessmentCard();
     renderCloud();
   }
 

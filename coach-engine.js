@@ -342,8 +342,9 @@
     return map[emotion.labels[0].key] || '这种感觉在这类场景里很常见，我们先处理它，再处理说什么。';
   }
 
-  function buildPrepReply(input, profile) {
+  function buildPrepReply(input, profile, opts) {
     var text = String(input || '');
+    var options = opts || {};
     var crisis = safetyCheck(text);
     if (crisis) return { blocks: [CRISIS_BLOCK], crisis: true };
 
@@ -352,6 +353,20 @@
     var guess = !found.length;
     var emotion = detectEmotions(text);
     var pressure = estimatePressure(scene.id, text, profile);
+
+    // 结合「社交画像」测试结果：同一个场景，对不同的人强调不同的事
+    // 分档口径与 assessment.js 的 BANDS 保持一致：≤2.4 较擅长 / ≤3.5 一般 / >3.5 偏吃力
+    var selfCheck = null;
+    var d = options.selfCheckDifficulty;
+    if (typeof d === 'number' && isFinite(d)) {
+      if (d > 3.5) {
+        selfCheck = '你的自评里「' + scene.name + '」预测难度 ' + d + '/5，属于偏吃力的场景。我们先花 30 秒把身体稳住，再看话术——顺序反了容易念不出口。';
+      } else if (d <= 2.4) {
+        selfCheck = '你的自评里「' + scene.name + '」预测难度只有 ' + d + '/5，这类场景你通常应付得来，可以直接跳到下面的话术。';
+      } else {
+        selfCheck = '你的自评里「' + scene.name + '」预测难度 ' + d + '/5，属于中等：先扫一眼开场句就够了。';
+      }
+    }
 
     var blocks = [];
     blocks.push({ type: 'empathy', text: empathyLine(emotion) });
@@ -365,6 +380,7 @@
       factors: pressure.factors,
       emotionLabels: emotion.labels.map(function (l) { return l.label; }),
       note: pressure.tendencyNote,
+      selfCheck: selfCheck,
       alternatives: found.slice(1).map(function (f) { return f.scene.name; })
     });
     blocks.push({
@@ -552,6 +568,35 @@
 
   function clip(v, n) { return typeof v === 'string' ? v.slice(0, n) : ''; }
 
+  /**
+   * 清洗"社交画像"自评结果（见 assessment.js）。
+   * 只保留必要字段：维度分数、准备度、倾向提示、时间戳；场景预测是可重算的，不入库。
+   */
+  function sanitizeAssessment(raw) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    var dimsRaw = (raw.dimensions && typeof raw.dimensions === 'object' && !Array.isArray(raw.dimensions)) ? raw.dimensions : {};
+    var dims = {};
+    Object.keys(dimsRaw).slice(0, 16).forEach(function (k) {
+      if (!/^[a-z][a-z0-9]{1,23}$/.test(k)) return;
+      var v = dimsRaw[k];
+      dims[k] = (typeof v === 'number' && isFinite(v)) ? Math.max(0, Math.min(100, Math.round(v))) : null;
+    });
+    if (!Object.keys(dims).length) return null;
+    var num = function (v, min, max) {
+      return (typeof v === 'number' && isFinite(v)) ? Math.max(min, Math.min(max, Math.round(v))) : null;
+    };
+    return {
+      version: 1,
+      at: clip(raw.at, 40) || new Date(0).toISOString(),
+      answered: num(raw.answered, 0, 200),
+      total: num(raw.total, 0, 200),
+      dimensions: dims,
+      readiness: num(raw.readiness, 0, 100),
+      tendencyHint: (raw.tendencyHint === 'i' || raw.tendencyHint === 'e') ? raw.tendencyHint : null,
+      flat: raw.flat === true
+    };
+  }
+
   function validateProfile(doc) {
     var errors = [];
     if (!doc || typeof doc !== 'object' || Array.isArray(doc)) return { ok: false, errors: ['画像不是对象'], profile: null };
@@ -590,6 +635,7 @@
       tendency: (doc.tendency === 'i' || doc.tendency === 'e') ? doc.tendency : null,
       reviews: cleanReviews,
       strategies: strategies,
+      assessment: sanitizeAssessment(doc.assessment),
       // 缺失时间字段时留空串，而不是补当前时间：避免校验/合并结果依赖时钟，前端本地优先的结构也更可预测
       createdAt: clip(doc.createdAt, 40),
       updatedAt: clip(doc.updatedAt, 40)
@@ -611,12 +657,18 @@
     reviews.sort(function (x, y) { return x.at < y.at ? -1 : x.at > y.at ? 1 : 0; });
     var newer = (a.updatedAt || '') > (b.updatedAt || '') ? a : b;
     var older = newer === a ? b : a;
+    // 画像测试结果取"更新的一次"（按测试时间），避免旧结果覆盖新结果
+    var assessA = a.assessment, assessB = b.assessment;
+    var assessment = null;
+    if (assessA && assessB) assessment = (assessA.at >= assessB.at) ? assessA : assessB;
+    else assessment = assessA || assessB || null;
     return {
       version: 1,
       tendency: newer.tendency || older.tendency || null,
       reviews: reviews,
       strategies: reviews.filter(function (r) { return r.effect === 'good' && r.action; })
         .map(function (r) { return { sceneId: r.sceneId, sceneName: r.sceneName, action: r.action, at: r.at }; }),
+      assessment: assessment,
       createdAt: (a.createdAt && b.createdAt && a.createdAt > b.createdAt ? b.createdAt : a.createdAt) || new Date().toISOString(),
       updatedAt: (a.updatedAt > b.updatedAt ? a.updatedAt : b.updatedAt) || new Date().toISOString()
     };

@@ -10,10 +10,12 @@ const vm = require('node:vm');
 const { createSandbox } = require('./dom-shim.js');
 const { createApp, createStore } = require('./server.js');
 const { startMockUpstash } = require('./mock-upstash.js');
+const Assess = require('./assessment.js');
 
 const dir = __dirname;
 const html = fs.readFileSync(path.join(dir, 'index.html'), 'utf8');
 const engineSrc = fs.readFileSync(path.join(dir, 'coach-engine.js'), 'utf8');
+const assessSrc = fs.readFileSync(path.join(dir, 'assessment.js'), 'utf8');
 const appSrc = fs.readFileSync(path.join(dir, 'app.js'), 'utf8');
 
 let pass = 0, fail = 0;
@@ -55,12 +57,29 @@ function makeDevice(base, label) {
   const box = createSandbox({ html, fetch: makeBrowserFetch(base), location: { protocol: 'https:' } });
   const ctx = vm.createContext(box.sandbox);
   vm.runInContext(engineSrc, ctx, { filename: 'coach-engine.js' });
+  vm.runInContext(assessSrc, ctx, { filename: 'assessment.js' });
   box.sandbox.CoachEngine = box.sandbox.window.CoachEngine;
   vm.runInContext(appSrc, ctx, { filename: 'app.js' });
   box.label = label;
   box.$ = (id) => box.byId[id];
   box.profile = () => JSON.parse(box.storage.get('social-coach.profile.v1') || 'null');
   return box;
+}
+
+/** 在指定设备上把 40 题答完（whenWeak 决定的维度给低分，制造可预测的画像） */
+function takeQuiz(device, weakDims) {
+  device.$('testStart').click();
+  const pages = Math.ceil(Assess.ITEMS.length / 8);
+  for (let page = 0; page < pages; page++) {
+    const items = device.$('testQuestions').querySelectorAll('.q-item');
+    items.forEach((node, idx) => {
+      const meta = Assess.ITEMS[page * 8 + idx];
+      const level = weakDims.includes(meta.dim) ? 2 : 5;
+      const wantRaw = meta.reverse ? (6 - level) : level;
+      node.querySelectorAll('.q-opt')[wantRaw - 1].click();
+    });
+    device.$('testNext').click();
+  }
 }
 
 (async function run() {
@@ -156,6 +175,25 @@ function makeDevice(base, label) {
   section('画像设置也会同步');
   B.$('tendencyChips').childNodes[0].click();
   ok('服务器收到 tendency=i', await until(async () => ((await serverProfile()) || {}).tendency === 'i'), String(((await serverProfile()) || {}).tendency));
+
+  section('社交画像测试：结果随账号同步到另一台设备');
+  takeQuiz(A, ['publicspeaking', 'improvising']);
+  const aAssess = A.profile().assessment;
+  ok('设备 A 完成 40 题并写入画像', !!aAssess && !!aAssess.dimensions, JSON.stringify(aAssess && aAssess.readiness));
+  ok('弱项维度得分明显更低', aAssess.dimensions.publicspeaking < aAssess.dimensions.group,
+    aAssess.dimensions.publicspeaking + ' vs ' + aAssess.dimensions.group);
+  ok('结果页给出了场景预测', /场景预测/.test(A.$('testResult').textContent));
+  ok('自动同步把画像推上服务器', await until(async () => !!((await serverProfile()) || {}).assessment),
+    JSON.stringify(((await serverProfile()) || {}).assessment));
+  B.$('cloudSyncBtn').click();
+  ok('设备 B 同步后拿到同一份画像', await until(() => {
+    const p = B.profile();
+    return p && p.assessment && typeof p.assessment.readiness === 'number';
+  }), JSON.stringify(B.profile() && B.profile().assessment));
+  ok('设备 B 的档案页显示已测试', /已测试/.test(B.$('assessTag').textContent), B.$('assessTag').textContent);
+  ok('设备 B 的场景预测与 A 一致',
+    JSON.stringify(Assess.predictScenes(B.profile().assessment.dimensions, require('./coach-engine.js').SCENES).map((p) => [p.id, p.difficulty])) ===
+    JSON.stringify(Assess.predictScenes(aAssess.dimensions, require('./coach-engine.js').SCENES).map((p) => [p.id, p.difficulty])));
 
   section('设备 B 退出登录：本机数据保留、账号解绑');
   B.$('cloudLogout').click();

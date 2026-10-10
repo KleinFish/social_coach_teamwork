@@ -30,7 +30,25 @@ report(missingIds.length === 0, `${refIds.size} 个 id 引用全部存在` + (mi
 console.log('\n== 2. 标签页与面板对应 ==');
 const tabs = [...html.matchAll(/data-tab="([\w-]+)"/g)].map(m => m[1]);
 tabs.forEach(t => report(htmlIds.has('panel-' + t), `data-tab="${t}" -> #panel-${t}`));
-report(tabs.length === 4, '标签页数量为 4（报告的四模块）');
+report(tabs.length === 5, '标签页数量为 5（四个功能模块 + 社交画像测试）');
+
+console.log('\n== 2b. 社交画像测试 ==');
+const assess = require('./assessment.js');
+const assessSrc = fs.readFileSync(path.join(dir, 'assessment.js'), 'utf8');
+const scriptOrder = [...html.matchAll(/<script src="([^"]+)"/g)].map(m => m[1]);
+report(scriptOrder.join(',') === 'coach-engine.js,assessment.js,app.js',
+  '脚本加载顺序正确：' + scriptOrder.join(' → '));
+report(assess.itemCount() <= 48, `题库 ${assess.itemCount()} 题（上限 48）`);
+report(assess.DIMENSIONS.length === 8 && assess.DIMENSIONS.every(d => assess.ITEMS.filter(i => i.dim === d.key).length === 5),
+  '8 个维度 × 5 题，结构完整');
+report(assess.DIMENSIONS.every(d => assess.ITEMS.filter(i => i.dim === d.key).some(i => i.reverse)),
+  '每个维度都含反向计分题');
+report(/SocialAssessment/.test(app), 'app.js 已接入画像模块');
+report(!/scenes:\s*(result|preds|predictions)/.test(app), '写库时不含可重算的场景预测（避免数据打架）');
+report(/selfCheckDifficulty/.test(app) && /selfCheck/.test(fs.readFileSync(path.join(dir, 'coach-engine.js'), 'utf8')),
+  '画像结果会同时影响「准备」的回复');
+report(/recommendEmergency/.test(app), '画像结果会同时影响「应急」的推荐入口');
+report(!/你应该/.test(assessSrc), '量表的题干与解读不含"你应该"');
 
 console.log('\n== 3. class 定义 ==');
 const used = new Set();

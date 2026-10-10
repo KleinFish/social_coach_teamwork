@@ -46,6 +46,7 @@
         </div>
         <p class="hint">选一个最接近的，马上给你一句可以直接念出口的话。</p>
         <div class="sos-grid mt-10" id="sosGrid"></div>
+        <div id="sosHintBox"></div>
       </div>
       <div id="sosResult">
         <div class="card"><div class="emergency-empty">还没有内容。上面选一个，或用文字回到「准备」里直接说。</div></div>
@@ -94,6 +95,41 @@
       <div id="reviewResult"></div>
     </section>
 
+    <!-- ============ 社交画像测试 ============ -->
+    <section class="panel" id="panel-test">
+      <div class="card" id="testIntro">
+        <div class="card-title-row">
+          <h2>社交画像测试</h2>
+          <span class="tag">40 题 · 约 4 分钟</span>
+        </div>
+        <p class="hint">按你平时的真实反应作答，不用挑"看起来更好"的选项。测完会给你一份画像，并预测你在哪些场景更顺手、哪些场景更吃力。</p>
+        <ul class="privacy-list">
+          <li>八个维度：破冰启动、小范围寒暄、群体融入、当众表达、权威沟通、临场应变、情绪恢复、社交续航</li>
+          <li>题量 40 题（不超过 48 题），5 级自评，每个维度都含反向计分题</li>
+          <li>结果默认只存在这台设备；登录后随画像一起同步到你的账号</li>
+          <li>这是<b>自评预测</b>，不是心理测评，也不做诊断</li>
+        </ul>
+        <div class="row-between mt-11">
+          <button class="btn" id="testStart">开始测试</button>
+          <span class="hint" id="testLastTime"></span>
+        </div>
+      </div>
+
+      <div class="card hidden" id="testQuiz">
+        <div class="row-between">
+          <div class="quiz-progress"><div class="quiz-progress-bar" id="testBar"></div></div>
+          <span class="quiz-count" id="testCount">1 / 5</span>
+        </div>
+        <div id="testQuestions" class="quiz-questions"></div>
+        <div class="row-between mt-11">
+          <button class="btn ghost small" id="testPrev">上一页</button>
+          <button class="btn" id="testNext">下一页</button>
+        </div>
+      </div>
+
+      <div id="testResult"></div>
+    </section>
+
     <!-- ============ 成长档案 ============ -->
     <section class="panel" id="panel-me">
       <div class="card">
@@ -103,6 +139,15 @@
         </div>
         <p class="hint">性格倾向只用于调整建议的语气与节奏，不会强制填写、也不会用于任何评分。</p>
         <div class="chips mt-8" id="tendencyChips"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title-row">
+          <h2>社交画像与场景预测</h2>
+          <span class="tag" id="assessTag">未测试</span>
+        </div>
+        <p class="hint">来自「测试」标签页的自评结果：哪些维度有底、哪些场景更吃力。</p>
+        <div id="assessBox"></div>
       </div>
 
       <div class="card">
@@ -202,6 +247,7 @@
       <button class="nav-btn active" data-tab="prep"><span class="ico">🗣️</span>准备</button>
       <button class="nav-btn" data-tab="sos"><span class="ico">🆘</span>应急</button>
       <button class="nav-btn" data-tab="review"><span class="ico">🪞</span>复盘</button>
+      <button class="nav-btn" data-tab="test"><span class="ico">🧭</span>测试</button>
       <button class="nav-btn" data-tab="me"><span class="ico">📈</span>档案</button>
     </div>
   </nav>
@@ -210,6 +256,7 @@
 <div class="toast" id="toast"></div>
 
 <script src="coach-engine.js"></script>
+<script src="assessment.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

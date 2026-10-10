@@ -128,5 +128,61 @@ ok('合并不修改入参', localOnly.reviews.length === 1 && remoteOnly.reviews
 ok('sameProfile 能识别等价画像', E.sameProfile(merged, E.mergeProfiles(remoteOnly, localOnly)) === true);
 ok('sameProfile 能识别差异', E.sameProfile(localOnly, remoteOnly) === false);
 
+/* 12. 社交画像（测试结果）的校验与合并 */
+section('画像测试结果的校验');
+const goodAssess = {
+  version: 1, at: '2026-10-10T04:00:00.000Z', answered: 40, total: 40,
+  dimensions: { initiating: 80, publicspeaking: 35, group: 62, junk_field: 'x' },
+  readiness: 59, tendencyHint: 'i', flat: false, scenes: [{ id: 'meeting-speak', difficulty: 4 }]
+};
+const va = E.validateProfile({ reviews: [], assessment: goodAssess });
+ok('合法画像被保留', va.ok && va.profile.assessment && va.profile.assessment.dimensions.initiating === 80);
+const clamped = E.validateProfile({ assessment: { dimensions: { initiating: 150, smalltalk: -20, recovery: 33.6 } } }).profile.assessment.dimensions;
+ok('超过 100 的值被夹到 100', clamped.initiating === 100, String(clamped.initiating));
+ok('小于 0 的值被夹到 0', clamped.smalltalk === 0, String(clamped.smalltalk));
+ok('小数被四舍五入', clamped.recovery === 34, String(clamped.recovery));
+ok('维度键名不合法会被丢弃', va.profile.assessment.dimensions.junk_field === undefined);
+ok('单字母等可疑键名同样丢弃',
+  E.validateProfile({ assessment: { dimensions: { a: 50, b: 60 } } }).profile.assessment === null);
+ok('可重算的场景预测不入库', va.profile.assessment.scenes === undefined);
+ok('非法 tendencyHint 归零', E.validateProfile({ assessment: { dimensions: { initiating: 50 }, tendencyHint: 'x' } }).profile.assessment.tendencyHint === null);
+ok('没有维度的画像被丢弃', E.validateProfile({ assessment: { at: '2026-01-01' } }).profile.assessment === null);
+ok('非对象画像被丢弃', E.validateProfile({ assessment: 'nope' }).profile.assessment === null);
+ok('没有画像时字段为 null', E.validateProfile({ reviews: [] }).profile.assessment === null);
+const clipped = E.validateProfile({ assessment: { dimensions: Object.fromEntries(Array.from({ length: 30 }, (_, i) => ['k' + i, 10])) } });
+ok('维度数量被限制（防滥用）', Object.keys(clipped.profile.assessment.dimensions).length <= 16,
+  String(Object.keys(clipped.profile.assessment.dimensions).length));
+
+section('画像测试结果的合并');
+const pLocal = E.createProfile();
+pLocal.assessment = { version: 1, at: '2026-10-01T00:00:00.000Z', dimensions: { initiating: 10 }, readiness: 10, tendencyHint: 'i', flat: false, answered: 40, total: 40 };
+const pRemote = E.createProfile();
+pRemote.assessment = { version: 1, at: '2026-10-09T00:00:00.000Z', dimensions: { initiating: 90 }, readiness: 90, tendencyHint: 'e', flat: false, answered: 40, total: 40 };
+const mergedAssess = E.mergeProfiles(pLocal, pRemote);
+ok('合并时取更新的那次测试', mergedAssess.assessment.readiness === 90, String(mergedAssess.assessment.readiness));
+const mergedAssess2 = E.mergeProfiles(pRemote, pLocal);
+ok('顺序无关（仍然取更新的）', mergedAssess2.assessment.readiness === 90);
+const onlyLocal = E.mergeProfiles(pLocal, E.createProfile());
+ok('只有一端有画像时保留它', onlyLocal.assessment && onlyLocal.assessment.readiness === 10);
+const noneAssess = E.mergeProfiles(E.createProfile(), E.createProfile());
+ok('两端都没有时为 null', noneAssess.assessment === null);
+ok('画像一致时 sameProfile 判定为相等',
+  E.sameProfile(mergedAssess, E.mergeProfiles(pRemote, pLocal)) === true);
+ok('画像不同时判定为不相等', E.sameProfile(pLocal, pRemote) === false);
+
+section('准备建议随画像分档');
+const prepNoAssess = E.buildPrepReply('明天课堂展示', null);
+ok('没有画像时不出现自评提示', !prepNoAssess.blocks[1].selfCheck);
+const prepHard = E.buildPrepReply('明天课堂展示', null, { selfCheckDifficulty: 3.9 });
+ok('预测偏吃力时先强调稳住状态', /偏吃力/.test(prepHard.blocks[1].selfCheck) && /先花 30 秒/.test(prepHard.blocks[1].selfCheck),
+  prepHard.blocks[1].selfCheck);
+const prepEasy = E.buildPrepReply('向店员问路', null, { selfCheckDifficulty: 1.2 });
+ok('预测顺手时直接给话术', /应付得来/.test(prepEasy.blocks[1].selfCheck), prepEasy.blocks[1].selfCheck);
+const prepMid = E.buildPrepReply('和不太熟的人吃饭', null, { selfCheckDifficulty: 3 });
+ok('预测中等时给出中等口径', /属于中等/.test(prepMid.blocks[1].selfCheck), prepMid.blocks[1].selfCheck);
+ok('分档口径与量表一致（>3.5 为偏吃力）',
+  /偏吃力/.test(E.buildPrepReply('开会发言', null, { selfCheckDifficulty: 3.6 }).blocks[1].selfCheck) &&
+  !/偏吃力/.test(E.buildPrepReply('开会发言', null, { selfCheckDifficulty: 3.5 }).blocks[1].selfCheck));
+
 console.log('\n结果：' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

@@ -11,7 +11,11 @@ class El {
     this.parentNode = null;
     this._className = '';
     this.dataset = {};
-    this.style = {};
+    this.style = {
+      _props: {},
+      setProperty(k, v) { this._props[k] = String(v); this[k] = String(v); },
+      getPropertyValue(k) { return this._props[k] || this[k] || ''; }
+    };
     this.listeners = {};
     this._text = '';
     this._html = '';
@@ -91,7 +95,16 @@ function createSandbox(options) {
   const tabs = [...html.matchAll(/data-tab="([\w-]+)"/g)].map((m) => m[1]);
   const root = new El('html');
   const byId = {};
-  ids.forEach((id) => { const e = new El('div'); e.dataset.__id = id; byId[id] = e; root.appendChild(e); });
+  ids.forEach((id) => {
+    const e = new El('div');
+    e.dataset.__id = id;
+    // 把 HTML 里的初始 class 也带进来（否则"初始隐藏"这类断言会失真）
+    const tag = html.match(new RegExp('<[^>]*\\bid="' + id + '"[^>]*>'));
+    const cls = tag ? /class="([^"]*)"/.exec(tag[0]) : null;
+    if (cls) e.className = cls[1];
+    byId[id] = e;
+    root.appendChild(e);
+  });
   tabs.forEach((t) => {
     const p = new El('section');
     p.className = 'panel';
