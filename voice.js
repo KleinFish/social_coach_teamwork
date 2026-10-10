@@ -203,6 +203,27 @@
     return session;
   }
 
+  /* ---------------- 识别文本清洗 ---------------- */
+  /**
+   * 浏览器内置识别常见问题：汉字之间插空格、开头带口语填充词、句尾没有标点。
+   * 这里做保守清洗（不猜内容、不改语序），只去掉明显噪音。
+   */
+  function normalizeTranscript(text) {
+    var t = String(text == null ? '' : text);
+    t = t.replace(/[\u200b-\u200f\ufeff]/g, '');                    // 零宽字符
+    t = t.replace(/([\u4e00-\u9fff])\s+(?=[\u4e00-\u9fff])/g, '$1'); // 汉字之间的空格
+    t = t.replace(/^(嗯+|呃+|啊+|唉+)[，,、]?\s*/, '');                // 句首填充词
+    t = t.replace(/([，。！？；])\s*(嗯+|呃+|啊+)[，,、]?\s*/g, '$1');   // 标点后的填充词
+    t = t.replace(/^(就是说)[，,、]?\s*/, '');                       // 句首口头语
+    t = t.replace(/^(那个|然后呢)[，,、]\s*/, '');                    // 只有后面跟停顿标点时才当成口头语（"那个，我…"），
+                                                                  // 直接接名词的"那个同学"是实义，必须保留
+    t = t.replace(/([，。！？；])\1+/g, '$1');                        // 重复标点
+    t = t.replace(/\s{2,}/g, ' ').trim();
+    // 只在以汉字结尾时补句号（英文/数字结尾保持原样，避免奇怪的中英混排）
+    if (t && /[\u4e00-\u9fff]$/.test(t) && !/[。！？…]$/.test(t)) t += '。';
+    return t;
+  }
+
   return {
     DEFAULT_LANG: DEFAULT_LANG,
     LANGS: [
@@ -213,6 +234,7 @@
     pickMode: pickMode,
     pickMimeType: pickMimeType,
     mapError: mapError,
+    normalizeTranscript: normalizeTranscript,
     createSession: createSession
   };
 });

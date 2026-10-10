@@ -52,7 +52,12 @@ report(/id="micInput"[\s\S]{0,500}<svg/.test(html) && !/id="micInput"[^>]*>🎤/
   '麦克风按钮用 SVG 图标（避免长按选中 emoji）');
 report(/\.mic-btn[\s\S]{0,300}user-select:\s*none/.test(cssSrc) && /touch-callout:\s*none/.test(cssSrc),
   '可点元素禁止长按选中与 iOS 长按菜单');
-report(/pointerdown/.test(app) && /pointerup/.test(app), '支持"按住说话、松开结束"的按压手势');
+report(/pointerdown/.test(app) && /pointerup/.test(app), '支持桌面端的"按住说话、松开结束"的按压手势');
+report(/isTouchPrimary/.test(app) && /pointer:\s*coarse|pointer: coarse/.test(app),
+  '触摸设备走点按切换（避免 pointercancel 把录音瞬间掐掉）');
+report(/normalizeTranscript/.test(app) && /normalizeTranscript/.test(voiceSrc),
+  '识别结果经过文本清洗（去填充词/空格、补标点）');
+report(/\$\('#voiceBar'\)\.addEventListener\('click'/.test(app), '状态条整体可点按停止（手机上更容易按到）');
 
 console.log('\n== 2b. 社交画像测试 ==');
 const assess = require('./assessment.js');

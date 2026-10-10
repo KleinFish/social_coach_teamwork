@@ -1026,7 +1026,28 @@
     $('#voiceBarText').textContent = text;
     bar.classList.remove('hidden');
   }
-  function setVoiceButton(btn, active) { if (btn) btn.classList.toggle('rec', !!active); }
+  function setVoiceButton(btn, active) {
+    if (!btn) return;
+    btn.classList.toggle('rec', !!active);
+    btn.setAttribute('aria-label', active ? '停止录音' : '语音输入');
+    btn.title = active ? '点击停止录音' : '语音输入';
+  }
+
+  /**
+   * 判断是否以触摸为主：这类设备上「按住说话」不可靠——
+   * 浏览器常在 pointerdown 之后立刻发出 pointercancel/pointerleave（判定为滚动手势），
+   * 结果就是"刚进入识别就被停掉"。所以触摸设备用「点一下开始、再点一下结束」。
+   */
+  function isTouchPrimary() {
+    if (typeof window === 'undefined') return false;
+    try {
+      if (window.matchMedia) {
+        if (window.matchMedia('(pointer: coarse)').matches) return true;
+        if (window.matchMedia('(hover: none)').matches) return true;
+      }
+    } catch (e) { /* ignore */ }
+    return false;
+  }
 
   function stopVoice() {
     if (voiceState.session) { voiceState.session.stop(); voiceState.session = null; }
@@ -1052,22 +1073,29 @@
     voiceState.button = btn;
     voiceState.field = field;
     voiceState.base = field.value ? field.value.replace(/\s+$/, '') + ' ' : '';
+    voiceState.gotText = false;
     setVoiceButton(btn, true);
-    showVoiceBar(mode === 'browser' ? '正在聆听…（说完会自动结束）' : '录音中…（说完点「停止」）');
+    var touch = isTouchPrimary();
+    showVoiceBar(mode === 'browser'
+      ? (touch ? '正在聆听…（说完点下方「停止」或再点一下麦克风）' : '正在聆听…（说完会自动结束）')
+      : (touch ? '录音中…（说完点下方「停止」）' : '录音中…（说完点「停止」或松开）'));
 
     voiceState.session = Voice.createSession(window, {
       mode: mode,
       lang: 'zh-CN',
       onPartial: function (text) { field.value = voiceState.base + text; },
       onFinal: function (text) {
-        if (text) field.value = voiceState.base + text;
+        var cleaned = text ? Voice.normalizeTranscript(text) : '';
+        if (cleaned) { field.value = voiceState.base + cleaned; voiceState.gotText = true; }
         voiceState.session = null;
         setVoiceButton(btn, false);
         showVoiceBar('');
-        if (text) toast('已填入语音内容，可以改一改再提交');
+        if (cleaned) toast('已填入语音内容，可以改一改再提交');
+        else if (!voiceState.errored) toast('没有听到内容，再说一次试试？');
       },
       onError: function (code, message) {
         voiceState.session = null;
+        voiceState.errored = true;
         setVoiceButton(btn, false);
         showVoiceBar('');
         var msg = message || '语音输入没能完成';
@@ -1075,6 +1103,8 @@
         if (code === 'network' && cloud.asr && !cloud.user) {
           msg += ' 登录后可以改用服务器转写。';
         }
+        // 附上原始错误码，方便把问题反馈给开发者（手机端排查尤其有用）
+        if (code) msg += '（代码：' + code + '）';
         toast(msg);
       },
       onState: function (s) {
@@ -1111,10 +1141,11 @@
 
   /**
    * 麦克风按钮交互：
-   *   - 移动端 / 支持 PointerEvent 的浏览器：**按住说话，松开结束**；
-   *     如果只是轻点一下（<400ms），则进入"再点一下结束"的切换模式（照顾手滑/不方便按住的情况）。
-   *   - 不支持 PointerEvent 的环境：退化为"点一下开始、再点一下结束"。
-   *   长按不再被浏览器的选中/复制菜单接管（见 styles.css 的 user-select / touch-callout 规则）。
+   *   - **触摸设备（手机/平板）**：点一下开始、再点一下结束。不依赖持续按压——
+   *     因为浏览器常在 pointerdown 后立刻抛出 pointercancel/pointerleave，会把录音瞬间掐掉。
+   *   - 桌面（有精确指针）：按住说话、松开结束；轻点一下则进入"再点一下结束"模式。
+   *   - 不支持 PointerEvent 的环境：退化为点按切换。
+   *   长按不再被浏览器的选中/复制菜单接管（见 styles.css）。
    */
   function bindMic(buttonId, fieldId) {
     var btn = $('#' + buttonId);
@@ -1123,11 +1154,9 @@
     var holding = false;
     var stopOnRelease = false;
 
+    function toggle() { voiceState.session ? stopVoice() : startVoice(fieldId, buttonId); }
     function begin() {
-      if (voiceState.session) {           // 已有会话：这次按下就是"结束"手势
-        stopOnRelease = true;
-        return;
-      }
+      if (voiceState.session) { stopOnRelease = true; return; }
       stopOnRelease = false;
       pressStart = Date.now();
       holding = true;
@@ -1139,10 +1168,10 @@
       holding = false;
       if (!voiceState.session) return;
       if (Date.now() - pressStart < 400) {
-        showVoiceBar('正在聆听…（说完再点一下麦克风结束）');   // 轻点：继续录，等再点一次
+        showVoiceBar('正在聆听…（说完再点一下麦克风结束）');
         return;
       }
-      stopVoice();                                          // 按住后松开：结束
+      stopVoice();
     }
     /** 手势被系统打断（来电、滚动抢占、滑出按钮）时一律停止，避免"一直在录" */
     function cancel() {
@@ -1152,21 +1181,21 @@
       if (voiceState.session) stopVoice();
     }
 
-    if (typeof window !== 'undefined' && window.PointerEvent) {
+    var hasPointer = typeof window !== 'undefined' && !!window.PointerEvent;
+    if (isTouchPrimary() || !hasPointer) {
+      btn.addEventListener('click', toggle);            // 触摸设备：点按切换（最稳）
+    } else {
       btn.addEventListener('pointerdown', begin);
       btn.addEventListener('pointerup', end);
       btn.addEventListener('pointercancel', cancel);
       btn.addEventListener('pointerleave', cancel);
-      btn.addEventListener('contextmenu', function (e) { e.preventDefault(); });
-      btn.addEventListener('selectstart', function (e) { e.preventDefault(); });
-    } else {
-      btn.addEventListener('click', function () { voiceState.session ? stopVoice() : startVoice(fieldId, buttonId); });
+      btn.addEventListener('click', function (e) {
+        // 桌面轻点会先经过 pointerdown/pointerup，这里不再重复处理，避免"开了立刻关"
+        if (e && e.preventDefault) e.preventDefault();
+      });
     }
     btn.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        if (voiceState.session) stopVoice(); else startVoice(fieldId, buttonId);
-      }
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
     });
     btn.addEventListener('contextmenu', function (e) { e.preventDefault(); });
     btn.addEventListener('selectstart', function (e) { e.preventDefault(); });
@@ -1176,6 +1205,11 @@
   bindMic('micAction', 'rvAction');
   bindMic('micNext', 'rvNext');
   $('#voiceStop').addEventListener('click', function () { stopVoice(); });
+  /* 状态条整体可点：手机上更容易按到"停止" */
+  $('#voiceBar').addEventListener('click', function (e) {
+    if (e && e.target && e.target.id === 'voiceStop') return;
+    stopVoice();
+  });
 
   /* ---------------- 成长档案 ---------------- */
   function renderMe() {

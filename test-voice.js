@@ -146,6 +146,24 @@ function makeEnv(opts) {
   await sleep(15);
   ok('转写失败时给出可读错误', serverErrors[serverErrors.length - 1] === 'transcribe-failed', JSON.stringify(serverErrors));
 
+  section('识别文本清洗（浏览器识别常见的三类噪音）');
+  ok('去掉汉字之间的空格', V.normalizeTranscript('明天 有 八个人 聚餐') === '明天有八个人聚餐。',
+    V.normalizeTranscript('明天 有 八个人 聚餐'));
+  ok('去掉句首填充词', V.normalizeTranscript('嗯，明天有聚餐') === '明天有聚餐。', V.normalizeTranscript('嗯，明天有聚餐'));
+  ok('去掉标点后的填充词', V.normalizeTranscript('明天有聚餐。嗯，其中两个不太熟') === '明天有聚餐。其中两个不太熟。',
+    V.normalizeTranscript('明天有聚餐。嗯，其中两个不太熟'));
+  ok('保留句中作实义的"那个"', V.normalizeTranscript('那个不太熟的同学也来') === '那个不太熟的同学也来。',
+    V.normalizeTranscript('那个不太熟的同学也来'));
+  ok('去掉句首作口头语的"那个，"', V.normalizeTranscript('那个，我不太想去') === '我不太想去。',
+    V.normalizeTranscript('那个，我不太想去'));
+  ok('去掉句首口头语"就是说"', V.normalizeTranscript('就是说，我不太想去') === '我不太想去。');
+  ok('合并重复标点', V.normalizeTranscript('好的。。') === '好的。');
+  ok('已有句号不重复添加', V.normalizeTranscript('我有点紧张。') === '我有点紧张。');
+  ok('英文结尾不强加中文句号', V.normalizeTranscript('hello') === 'hello');
+  ok('去掉零宽字符', V.normalizeTranscript('明天\u200b有聚餐') === '明天有聚餐。');
+  ok('空输入与 null 安全', V.normalizeTranscript('') === '' && V.normalizeTranscript(null) === '');
+  ok('清洗是幂等的', V.normalizeTranscript(V.normalizeTranscript('嗯 明天 有聚餐')) === '明天有聚餐。');
+
   section('边界情况');
   let noneErr = null;
   V.createSession(makeEnv({ sr: false, recorder: false }), { mode: 'none', onError: (c) => { noneErr = c; } });

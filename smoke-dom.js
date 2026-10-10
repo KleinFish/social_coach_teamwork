@@ -221,7 +221,50 @@ ok('本地文件模式仍可正常对话', (function () {
   return fileBox.byId['chat'].childNodes.length === n + 2;
 })());
 
-/* ---------- 场景三：按住说话（注入 PointerEvent 能力） ---------- */
+/* ---------- 场景四：触摸设备（点按切换，修复"按下瞬间就退出"） ---------- */
+(async function touchDevice() {
+  console.log('\n【场景四】触摸设备：点按切换');
+  const tbox = createSandbox({ html, fetch: () => Promise.reject(new Error('offline')) });
+  tbox.sandbox.SpeechRecognition = FakeSR;
+  tbox.sandbox.window.SpeechRecognition = FakeSR;
+  tbox.sandbox.PointerEvent = function PointerEvent() {};
+  tbox.sandbox.window.PointerEvent = tbox.sandbox.PointerEvent;
+  const fakeMM = (q) => ({ matches: /pointer:\s*coarse|hover:\s*none/.test(String(q)) });
+  tbox.sandbox.matchMedia = fakeMM;
+  tbox.sandbox.window.matchMedia = fakeMM;
+  const tctx = vm.createContext(tbox.sandbox);
+  vm.runInContext(engineSrc, tctx, { filename: 'coach-engine.js' });
+  vm.runInContext(assessSrc, tctx, { filename: 'assessment.js' });
+  vm.runInContext(voiceSrc, tctx, { filename: 'voice.js' });
+  vm.runInContext(appSrc, tctx, { filename: 'app.js' });
+  const $t = (id) => tbox.byId[id];
+
+  ok('触摸设备上麦克风按钮可用', !$t('micInput').classList.contains('hidden'));
+  $t('micInput').click();
+  ok('点一下 → 开始录音', !$t('voiceBar').classList.contains('hidden') && $t('micInput').classList.contains('rec'));
+  ok('状态提示如何结束（不再让人找不到开关）', /停止/.test($t('voiceBarText').textContent), $t('voiceBarText').textContent);
+
+  // 关键回归：触摸设备不绑定 pointer 手势，pointercancel 不应掐掉录音
+  $t('micInput').dispatchEvent({ type: 'pointerdown' });
+  $t('micInput').dispatchEvent({ type: 'pointercancel' });
+  ok('pointercancel 不会中断录音（旧版正是在这里"瞬间退出"）', !$t('voiceBar').classList.contains('hidden'));
+
+  FakeSR.last.emit([{ isFinal: false, 0: { transcript: '嗯 明天 有八个人聚餐' } }]);
+  ok('识别中间结果实时回填', /明天/.test($t('input').value), $t('input').value);
+  FakeSR.last.emit([{ isFinal: true, 0: { transcript: '嗯 明天 有八个人聚餐 其中两个不太熟' } }]);
+  FakeSR.last.end();
+  ok('文本已清洗（去句首"嗯"、去汉字间空格、补句号）',
+    $t('input').value === '明天有八个人聚餐其中两个不太熟。', $t('input').value);
+  ok('识别结束后按钮与状态条复位',
+    !$t('micInput').classList.contains('rec') && $t('voiceBar').classList.contains('hidden'));
+
+  $t('micInput').click();
+  ok('再次点按开始新的录音', !$t('voiceBar').classList.contains('hidden'));
+  $t('voiceBar').click();
+  ok('点状态条即可停止（手机上更容易按到）', $t('voiceBar').classList.contains('hidden'));
+})();
+
+/* ---------- 场景三：按住说话（桌面指针设备） ---------- */
 (async function pressAndHold() {
   console.log('\n【场景三】按住说话 / 轻点切换');
   const pbox = createSandbox({ html, fetch: () => Promise.reject(new Error('offline')) });
