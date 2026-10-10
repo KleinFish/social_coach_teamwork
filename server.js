@@ -324,7 +324,9 @@ const MIME = {
   '.png': 'image/png',
   '.ico': 'image/x-icon'
 };
-const PUBLIC_FILES = new Set(['/index.html', '/styles.css', '/app.js', '/coach-engine.js']);
+/* 只对外暴露白名单内的前端文件：源码、测试脚本、数据库一律不可下载。
+   注意：index.html 里 <script src> 引用的每个文件都必须在这里，否则线上会 404（见 test-server.js 的回归用例）。 */
+const PUBLIC_FILES = new Set(['/index.html', '/styles.css', '/app.js', '/coach-engine.js', '/assessment.js']);
 
 function createApp(options) {
   const opts = options || {};
