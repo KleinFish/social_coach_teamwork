@@ -23,6 +23,7 @@ const ok = (name, cond, extra) => {
   else { fail++; console.log('  FAIL  ' + name + (extra !== undefined ? '  -> ' + extra : '')); }
 };
 const section = (t) => console.log('\n== ' + t + ' ==');
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function boot(opts) {
   const box = createSandbox(Object.assign({ html }, opts));
@@ -220,5 +221,50 @@ ok('本地文件模式仍可正常对话', (function () {
   return fileBox.byId['chat'].childNodes.length === n + 2;
 })());
 
-console.log('\n结果：' + pass + ' passed, ' + fail + ' failed');
-process.exit(fail ? 1 : 0);
+/* ---------- 场景三：按住说话（注入 PointerEvent 能力） ---------- */
+(async function pressAndHold() {
+  console.log('\n【场景三】按住说话 / 轻点切换');
+  const pbox = createSandbox({ html, fetch: () => Promise.reject(new Error('offline')) });
+  pbox.sandbox.SpeechRecognition = FakeSR;
+  pbox.sandbox.window.SpeechRecognition = FakeSR;
+  pbox.sandbox.PointerEvent = function PointerEvent() {};
+  pbox.sandbox.window.PointerEvent = pbox.sandbox.PointerEvent;
+  const pctx = vm.createContext(pbox.sandbox);
+  vm.runInContext(engineSrc, pctx, { filename: 'coach-engine.js' });
+  vm.runInContext(assessSrc, pctx, { filename: 'assessment.js' });
+  vm.runInContext(voiceSrc, pctx, { filename: 'voice.js' });
+  vm.runInContext(appSrc, pctx, { filename: 'app.js' });
+  const $p = (id) => pbox.byId[id];
+
+  ok('支持按压手势时麦克风按钮可用', !$p('micInput').classList.contains('hidden'));
+  $p('micInput').dispatchEvent({ type: 'pointerdown' });
+  ok('按住即开始录音', !$p('voiceBar').classList.contains('hidden') && $p('micInput').classList.contains('rec'));
+  await sleep(450);
+  $p('micInput').dispatchEvent({ type: 'pointerup' });
+  ok('按住约 0.5 秒后松开 → 自动结束',
+    $p('voiceBar').classList.contains('hidden') && !$p('micInput').classList.contains('rec'));
+
+  $p('micInput').dispatchEvent({ type: 'pointerdown' });
+  $p('micInput').dispatchEvent({ type: 'pointerup' });          // 轻点（<400ms）
+  ok('轻点一下不会立刻结束（进入"再点一下"模式）', !$p('voiceBar').classList.contains('hidden'));
+  ok('状态条提示再点一下结束', /再点一下/.test($p('voiceBarText').textContent), $p('voiceBarText').textContent);
+  $p('micInput').dispatchEvent({ type: 'pointerdown' });
+  $p('micInput').dispatchEvent({ type: 'pointerup' });
+  ok('再点一下即结束', $p('voiceBar').classList.contains('hidden'));
+
+  $p('micInput').dispatchEvent({ type: 'pointerdown' });
+  $p('micInput').dispatchEvent({ type: 'pointercancel' });
+  ok('手势被系统打断时也会停止（不会一直录）', $p('voiceBar').classList.contains('hidden'));
+
+  ok('复盘页的按住说话按钮同样可用',
+    !$p('micAction').classList.contains('hidden') && !$p('micNext').classList.contains('hidden'));
+  $p('micAction').dispatchEvent({ type: 'pointerdown' });
+  ok('复盘输入框的按压手势也进入录音', !$p('voiceBar').classList.contains('hidden'));
+  FakeSR.last.emit([{ isFinal: true, 0: { transcript: '我先说了一句兜底的话' } }]);
+  FakeSR.last.end();
+  await sleep(20);
+  ok('识别结果写入复盘输入框', /我先说了一句兜底的话/.test($p('rvAction').value), $p('rvAction').value);
+
+  console.log('\n结果：' + pass + ' passed, ' + fail + ' failed');
+  process.exit(fail ? 1 : 0);
+})();

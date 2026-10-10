@@ -47,6 +47,12 @@ report(!/writeFile|appendFile/.test(server.split('transcribe')[1] ? server.split
   '转写路径不写文件（音频不落盘）');
 report(/麦克风权限/.test(voice.mapError('not-allowed')), '错误提示是可读的中文');
 report(!/你应该/.test(voiceSrc), '语音模块文案不含"你应该"');
+const cssSrc = fs.readFileSync(path.join(dir, 'styles.css'), 'utf8');
+report(/id="micInput"[\s\S]{0,500}<svg/.test(html) && !/id="micInput"[^>]*>🎤/.test(html),
+  '麦克风按钮用 SVG 图标（避免长按选中 emoji）');
+report(/\.mic-btn[\s\S]{0,300}user-select:\s*none/.test(cssSrc) && /touch-callout:\s*none/.test(cssSrc),
+  '可点元素禁止长按选中与 iOS 长按菜单');
+report(/pointerdown/.test(app) && /pointerup/.test(app), '支持"按住说话、松开结束"的按压手势');
 
 console.log('\n== 2b. 社交画像测试 ==');
 const assess = require('./assessment.js');

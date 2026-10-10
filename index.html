@@ -31,7 +31,9 @@
         <div class="suggest" id="suggest"></div>
         <div class="composer-inner">
           <textarea id="input" rows="1" placeholder="说说待会儿要面对的场景，比如：8 人聚餐，其中两个不太熟"></textarea>
-          <button class="mic-btn" id="micInput" type="button" title="语音输入">🎤</button>
+          <button class="mic-btn" id="micInput" type="button" title="按住说话，松开结束；也可以点一下开始、再点一下结束" aria-label="语音输入">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3z"/><path d="M18.5 11a.9.9 0 0 0-1.8 0 4.7 4.7 0 0 1-9.4 0 .9.9 0 0 0-1.8 0 6.5 6.5 0 0 0 5.6 6.42V20H9.4a.9.9 0 0 0 0 1.8h5.2a.9.9 0 0 0 0-1.8h-1.7v-2.58A6.5 6.5 0 0 0 18.5 11z"/></svg>
+          </button>
           <button class="btn" id="sendBtn">发送</button>
         </div>
       </div>
@@ -79,7 +81,10 @@
         <div class="field">
           <label for="rvAction">我做了什么</label>
           <textarea id="rvAction" placeholder="例：先说了一句兜底的话，然后把话题交给对方"></textarea>
-          <button class="mic-btn inline" id="micAction" type="button">🎤 语音输入</button>
+          <button class="mic-btn inline" id="micAction" type="button">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3z"/><path d="M18.5 11a.9.9 0 0 0-1.8 0 4.7 4.7 0 0 1-9.4 0 .9.9 0 0 0-1.8 0 6.5 6.5 0 0 0 5.6 6.42V20H9.4a.9.9 0 0 0 0 1.8h5.2a.9.9 0 0 0 0-1.8h-1.7v-2.58A6.5 6.5 0 0 0 18.5 11z"/></svg>
+            <span>按住说话</span>
+          </button>
         </div>
         <div class="field">
           <label>效果</label>
@@ -88,7 +93,10 @@
         <div class="field">
           <label for="rvNext">下次想换的一个小动作（只写一个）</label>
           <textarea id="rvNext" placeholder="例：提前写好饭后离场的理由"></textarea>
-          <button class="mic-btn inline" id="micNext" type="button">🎤 语音输入</button>
+          <button class="mic-btn inline" id="micNext" type="button">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3z"/><path d="M18.5 11a.9.9 0 0 0-1.8 0 4.7 4.7 0 0 1-9.4 0 .9.9 0 0 0-1.8 0 6.5 6.5 0 0 0 5.6 6.42V20H9.4a.9.9 0 0 0 0 1.8h5.2a.9.9 0 0 0 0-1.8h-1.7v-2.58A6.5 6.5 0 0 0 18.5 11z"/></svg>
+            <span>按住说话</span>
+          </button>
         </div>
         <div class="row-between">
           <button class="btn" type="submit">完成复盘</button>

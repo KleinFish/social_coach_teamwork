@@ -1109,9 +1109,72 @@
     });
   }
 
-  $('#micInput').addEventListener('click', function () { startVoice('input', 'micInput'); });
-  $('#micAction').addEventListener('click', function () { startVoice('rvAction', 'micAction'); });
-  $('#micNext').addEventListener('click', function () { startVoice('rvNext', 'micNext'); });
+  /**
+   * 麦克风按钮交互：
+   *   - 移动端 / 支持 PointerEvent 的浏览器：**按住说话，松开结束**；
+   *     如果只是轻点一下（<400ms），则进入"再点一下结束"的切换模式（照顾手滑/不方便按住的情况）。
+   *   - 不支持 PointerEvent 的环境：退化为"点一下开始、再点一下结束"。
+   *   长按不再被浏览器的选中/复制菜单接管（见 styles.css 的 user-select / touch-callout 规则）。
+   */
+  function bindMic(buttonId, fieldId) {
+    var btn = $('#' + buttonId);
+    if (!btn) return;
+    var pressStart = 0;
+    var holding = false;
+    var stopOnRelease = false;
+
+    function begin() {
+      if (voiceState.session) {           // 已有会话：这次按下就是"结束"手势
+        stopOnRelease = true;
+        return;
+      }
+      stopOnRelease = false;
+      pressStart = Date.now();
+      holding = true;
+      startVoice(fieldId, buttonId);
+    }
+    function end() {
+      if (stopOnRelease) { stopOnRelease = false; holding = false; stopVoice(); return; }
+      if (!holding) return;
+      holding = false;
+      if (!voiceState.session) return;
+      if (Date.now() - pressStart < 400) {
+        showVoiceBar('正在聆听…（说完再点一下麦克风结束）');   // 轻点：继续录，等再点一次
+        return;
+      }
+      stopVoice();                                          // 按住后松开：结束
+    }
+    /** 手势被系统打断（来电、滚动抢占、滑出按钮）时一律停止，避免"一直在录" */
+    function cancel() {
+      if (stopOnRelease) { stopOnRelease = false; holding = false; stopVoice(); return; }
+      if (!holding) return;
+      holding = false;
+      if (voiceState.session) stopVoice();
+    }
+
+    if (typeof window !== 'undefined' && window.PointerEvent) {
+      btn.addEventListener('pointerdown', begin);
+      btn.addEventListener('pointerup', end);
+      btn.addEventListener('pointercancel', cancel);
+      btn.addEventListener('pointerleave', cancel);
+      btn.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+      btn.addEventListener('selectstart', function (e) { e.preventDefault(); });
+    } else {
+      btn.addEventListener('click', function () { voiceState.session ? stopVoice() : startVoice(fieldId, buttonId); });
+    }
+    btn.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        if (voiceState.session) stopVoice(); else startVoice(fieldId, buttonId);
+      }
+    });
+    btn.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+    btn.addEventListener('selectstart', function (e) { e.preventDefault(); });
+  }
+
+  bindMic('micInput', 'input');
+  bindMic('micAction', 'rvAction');
+  bindMic('micNext', 'rvNext');
   $('#voiceStop').addEventListener('click', function () { stopVoice(); });
 
   /* ---------------- 成长档案 ---------------- */
