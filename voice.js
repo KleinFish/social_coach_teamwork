@@ -109,12 +109,14 @@
     var timer = null;
     var session = {
       mode: mode,
+      ended: false,
       /** 用户主动结束：优雅停止（把已识别到的内容交出来），而不是丢弃 */
       stop: function () { stopped = true; gracefulStop(); }
     };
 
+    function finish() { session.ended = true; }
     function state(s) { if (o.onState) o.onState(s); }
-    function fail(code) { if (o.onError) o.onError(code, mapError(code)); }
+    function fail(code) { finish(); if (o.onError) o.onError(code, mapError(code)); }
 
     function cleanup() { if (timer) { clearTimeout(timer); timer = null; } }
 
@@ -174,6 +176,7 @@
       };
       rec.onend = function () {
         cleanup();
+        finish();
         state('idle');
         if (o.onFinal) o.onFinal(finalText.trim());   // 空文本也交出去，让上层给出"没听到内容"的反馈
       };
@@ -207,6 +210,7 @@
         blobToBase64(env, blob).then(function (b64) {
           if (!o.transcribe) { state('idle'); fail('server-not-configured'); return; }
           return o.transcribe(b64, blob.type).then(function (text) {
+            finish();
             state('idle');
             if (o.onFinal) o.onFinal(String(text || '').trim());
           });

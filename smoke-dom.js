@@ -222,7 +222,7 @@ ok('本地文件模式仍可正常对话', (function () {
 })());
 
 /* ---------- 场景四：触摸设备（点按切换，修复"按下瞬间就退出"） ---------- */
-(async function touchDevice() {
+const pTouch = (async function touchDevice() {
   console.log('\n【场景四】触摸设备：点按切换');
   const tbox = createSandbox({ html, fetch: () => Promise.reject(new Error('offline')) });
   tbox.sandbox.SpeechRecognition = FakeSR;
@@ -265,7 +265,7 @@ ok('本地文件模式仍可正常对话', (function () {
 })();
 
 /* ---------- 场景三：按住说话（桌面指针设备） ---------- */
-(async function pressAndHold() {
+const pPress = (async function pressAndHold() {
   console.log('\n【场景三】按住说话 / 轻点切换');
   const pbox = createSandbox({ html, fetch: () => Promise.reject(new Error('offline')) });
   pbox.sandbox.SpeechRecognition = FakeSR;
@@ -307,6 +307,37 @@ ok('本地文件模式仍可正常对话', (function () {
   FakeSR.last.end();
   await sleep(20);
   ok('识别结果写入复盘输入框', /我先说了一句兜底的话/.test($p('rvAction').value), $p('rvAction').value);
+})();
+
+/* ---------- 场景五：识别器"一启动就失败"之后还能不能再用（回归） ---------- */
+class FakeSRFailFast {
+  constructor() { FakeSRFailFast.count++; this.lang = ''; }
+  start() { if (this.onerror) this.onerror({ error: 'aborted' }); if (this.onend) this.onend(); }
+  stop() { } abort() { }
+}
+FakeSRFailFast.count = 0;
+
+(async function failFastRecovery() {
+  await pTouch;                       // 等触摸场景跑完（它们内部有 await）
+  await pPress;
+  console.log('\n【场景五】识别器一启动就失败（微信常见）→ 再次点击应能重新开始');
+  const fbox = createSandbox({ html, fetch: () => Promise.reject(new Error('offline')) });
+  fbox.sandbox.SpeechRecognition = FakeSRFailFast;
+  fbox.sandbox.window.SpeechRecognition = FakeSRFailFast;
+  const fctx = vm.createContext(fbox.sandbox);
+  vm.runInContext(engineSrc, fctx, { filename: 'coach-engine.js' });
+  vm.runInContext(assessSrc, fctx, { filename: 'assessment.js' });
+  vm.runInContext(voiceSrc, fctx, { filename: 'voice.js' });
+  vm.runInContext(appSrc, fctx, { filename: 'app.js' });
+  const $f = (id) => fbox.byId[id];
+
+  $f('micInput').click();                         // 第一次：立刻失败
+  ok('第一次点击确实启动了识别器', FakeSRFailFast.count === 1, '启动 ' + FakeSRFailFast.count + ' 次');
+  ok('失败后状态条已收起', $f('voiceBar').classList.contains('hidden'));
+  $f('micInput').click();                         // 第二次：必须能重新开始（旧版会在这里"点了没反应"）
+  ok('**失败后再次点击能重新开始**（不会卡在"已结束的会话"上）',
+    FakeSRFailFast.count === 2, '启动 ' + FakeSRFailFast.count + ' 次');
+  FakeSRFailFast.count = 0;
 
   console.log('\n结果：' + pass + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);

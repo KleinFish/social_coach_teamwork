@@ -1065,6 +1065,7 @@
     var field = $('#' + fieldId);
     var btn = $('#' + buttonId);
     if (!field || !btn) return;
+    if (voiceState.session && voiceState.session.ended) voiceState.session = null;   // 清理已结束的残留会话
     if (voiceState.session) { stopVoice(); return; }        // 再点一次＝停止
 
     var mode = voiceMode();
@@ -1086,7 +1087,7 @@
       ? (touch ? '正在聆听…（说完点下方「停止」或再点一下麦克风）' : '正在聆听…（说完会自动结束）')
       : (touch ? '录音中…（说完点下方「停止」）' : '录音中…（说完点「停止」或松开）'));
 
-    voiceState.session = Voice.createSession(window, {
+    var newSession = Voice.createSession(window, {
       mode: mode,
       lang: 'zh-CN',
       onPartial: function (text) { field.value = voiceState.base + text; },
@@ -1135,6 +1136,9 @@
         });
       }
     });
+    // 会话可能在回调里**同步就结束了**（例如识别器一启动就报错）。
+    // 这时不能再把它记成"当前会话"，否则下一次点麦克风会被当成"停止"，表现为点了没反应。
+    voiceState.session = newSession && newSession.ended ? null : newSession;
   }
 
   function renderVoiceButtons() {
