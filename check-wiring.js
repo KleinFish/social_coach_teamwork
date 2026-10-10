@@ -55,6 +55,8 @@ report(/\.mic-btn[\s\S]{0,300}user-select:\s*none/.test(cssSrc) && /touch-callou
 report(/pointerdown/.test(app) && /pointerup/.test(app), '支持桌面端的"按住说话、松开结束"的按压手势');
 report(/isTouchPrimary/.test(app) && /pointer:\s*coarse|pointer: coarse/.test(app),
   '触摸设备走点按切换（避免 pointercancel 把录音瞬间掐掉）');
+report(/preferServer/.test(app) && /prefer:\s*preferServer/.test(app),
+  '手机或浏览器通道失败后，自动改用服务端转写');
 report(/normalizeTranscript/.test(app) && /normalizeTranscript/.test(voiceSrc),
   '识别结果经过文本清洗（去填充词/空格、补标点）');
 report(/\$\('#voiceBar'\)\.addEventListener\('click'/.test(app), '状态条整体可点按停止（手机上更容易按到）');

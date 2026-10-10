@@ -254,7 +254,7 @@ function startMock(mode) {
     let raw = '';
     req.on('data', (c) => { raw += c; });
     req.on('end', () => {
-      asrCall = { auth: req.headers.authorization, bytes: raw.length, contentType: req.headers['content-type'] || '' };
+      asrCall = { auth: req.headers.authorization, bytes: raw.length, contentType: req.headers['content-type'] || '', body: raw };
       if (/fail/.test(asrCall.auth || '')) { res.writeHead(500); res.end('boom'); return; }
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ text: '明天课堂展示，我有点紧张' }));
@@ -273,6 +273,9 @@ function startMock(mode) {
     ok('上游收到的是 multipart 与 Bearer 密钥',
       /multipart\/form-data/.test(asrCall.contentType) && asrCall.auth === 'Bearer asr-key', JSON.stringify(asrCall));
     ok('上传体不为空（音频确实转发过去了）', asrCall.bytes > 100, String(asrCall.bytes));
+    const wav = await J.post('/api/transcribe', { audioBase64: AUDIO, mime: 'audio/wav' });
+    ok('wav 会以 .wav 文件名转发（避免服务商按扩展名解析失败）',
+      wav.status === 200 && /filename="speech\.wav"/.test(asrCall.body || ''), (asrCall.body || '').slice(0, 120));
     ok('空音频被拒 400', (await J.post('/api/transcribe', { audioBase64: '', mime: 'audio/webm' })).status === 400);
     const tooBig = await J.post('/api/transcribe', { audioBase64: 'A'.repeat(4 * 1024 * 1024 + 10), mime: 'audio/webm' });
     ok('超长录音被拒（413 或 429）', [400, 413].includes(tooBig.status), String(tooBig.status));

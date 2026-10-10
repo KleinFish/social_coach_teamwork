@@ -1016,7 +1016,11 @@
 
   function voiceMode() {
     if (!Voice) return 'none';
-    return Voice.pickMode(window, { serverAvailable: !!(cloud.user && cloud.asr) });
+    var serverAvailable = !!(cloud.user && cloud.asr);
+    // 触摸设备（手机）优先走服务端转写：浏览器内置识别在国内基本连不上；
+    // 另外只要浏览器通道失败过一次，本次会话就改走服务端。
+    var preferServer = serverAvailable && (isTouchPrimary() || voiceState.preferServer);
+    return Voice.pickMode(window, { serverAvailable: serverAvailable, prefer: preferServer ? 'server' : undefined });
   }
 
   function showVoiceBar(text) {
@@ -1099,11 +1103,14 @@
         setVoiceButton(btn, false);
         showVoiceBar('');
         var msg = message || '语音输入没能完成';
-        // 浏览器内置识别常因网络不可用（国内尤甚）：如果服务器配了转写，引导用户登录后改走服务端
-        if (code === 'network' && cloud.asr && !cloud.user) {
+        var serverReady = !!(cloud.user && cloud.asr);
+        // 浏览器内置识别常见失败（国内网络/内置浏览器限制）：下次自动改用服务端转写
+        if ((code === 'network' || code === 'service-not-allowed' || code === 'aborted') && serverReady && !voiceState.preferServer) {
+          voiceState.preferServer = true;
+          msg += ' 下次会自动改用服务器转写。';
+        } else if (code === 'network' && cloud.asr && !cloud.user) {
           msg += ' 登录后可以改用服务器转写。';
         }
-        // 附上原始错误码，方便把问题反馈给开发者（手机端排查尤其有用）
         if (code) msg += '（代码：' + code + '）';
         toast(msg);
       },

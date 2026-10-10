@@ -611,7 +611,14 @@ function createApp(options) {
       if (!buf.length) { json(res, 400, { error: '音频数据为空' }); return; }
       try {
         const form = new FormData();
-        form.append('file', new Blob([buf], { type: String(body.mime || 'audio/webm') }), 'speech.webm');
+        const mime = String(body.mime || 'audio/webm').toLowerCase();
+        // 按音频类型给出正确的扩展名：部分 ASR 服务靠文件名判断格式，写成 .webm 会让 wav 解析失败
+        const ext = mime.indexOf('wav') >= 0 ? 'wav'
+          : (mime.indexOf('mp3') >= 0 || mime.indexOf('mpeg') >= 0) ? 'mp3'
+            : mime.indexOf('ogg') >= 0 ? 'ogg'
+              : (mime.indexOf('mp4') >= 0 || mime.indexOf('m4a') >= 0) ? 'm4a'
+                : mime.indexOf('flac') >= 0 ? 'flac' : 'webm';
+        form.append('file', new Blob([buf], { type: mime }), 'speech.' + ext);
         form.append('model', asr.model || 'whisper-1');
         const upstream = await fetch(asr.endpoint, {
           method: 'POST',
