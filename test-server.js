@@ -117,6 +117,13 @@ function startMock(mode) {
   ok('支持 ETag 协商缓存（304）', cached.status === 304, String(cached.status));
   ok('阻止路径穿越', [403, 404].includes(await rawGet('/../server.js')));
   ok('阻止编码路径穿越（%2f 到系统目录）', [403, 404].includes(await rawGet('/..%2f..%2fWindows%2fwin.ini')));
+  // 前端资源带 ?v= 版本号（防缓存），服务端必须按 pathname 匹配白名单，否则线上会整页 404
+  for (const f of ['/app.js', '/styles.css', '/voice.js', '/coach-engine.js', '/assessment.js']) {
+    const withVer = await fetch(base + f + '?v=20261010c');
+    ok(`${f}?v=… 仍能正常返回（带版本号不会 404）`, withVer.status === 200, String(withVer.status));
+  }
+  ok('带版本号也不能绕过白名单', (await fetch(base + '/server.js?v=20261010c')).status === 404);
+  ok('带版本号的路径穿越仍被拦', [403, 404].includes(await rawGet('/../server.js?v=1')));
   ok('服务端源码不可下载', (await fetch(base + '/server.js')).status === 404);
   ok('测试脚本不可下载', (await fetch(base + '/test-server.js')).status === 404);
   ok('数据库文件不可下载', (await fetch(base + '/data/social-coach.db')).status === 404);

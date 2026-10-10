@@ -1045,6 +1045,8 @@
   function isTouchPrimary() {
     if (typeof window === 'undefined') return false;
     try {
+      // maxTouchPoints 是判断手机/平板最可靠的信号（微信 X5 的 matchMedia 不一定准）
+      if (window.navigator && window.navigator.maxTouchPoints > 0) return true;
       if (window.matchMedia) {
         if (window.matchMedia('(pointer: coarse)').matches) return true;
         if (window.matchMedia('(hover: none)').matches) return true;
@@ -1068,7 +1070,7 @@
     var mode = voiceMode();
     if (mode === 'none') {
       if (!cloud.available) toast('本地文件模式不支持语音输入，把网站部署到服务器上即可使用');
-      else if (!cloud.user && cloud.asr) toast('登录后就能用语音输入（服务器转写）；现在也可以直接手动输入');
+      else if (!cloud.user && cloud.asr) toast('语音转写需要先登录：去「档案」页注册一个账号（10 秒），之后微信里也能用语音');
       else if (!cloud.asr) toast('服务器未配置语音转写，当前浏览器也不支持语音识别，请手动输入');
       else toast('当前浏览器不支持语音输入，请手动输入');
       return;
@@ -1104,12 +1106,13 @@
         showVoiceBar('');
         var msg = message || '语音输入没能完成';
         var serverReady = !!(cloud.user && cloud.asr);
-        // 浏览器内置识别常见失败（国内网络/内置浏览器限制）：下次自动改用服务端转写
-        if ((code === 'network' || code === 'service-not-allowed' || code === 'aborted') && serverReady && !voiceState.preferServer) {
+        if (!serverReady && cloud.asr) {
+          // 服务器配了转写，但没登录 —— 这是手机上最容易踩的坑，直接把下一步说清楚
+          msg = '这条通道在微信/手机上不可用。登录后就能改用服务器转写：去「档案」页注册一个账号即可。';
+        } else if ((code === 'network' || code === 'service-not-allowed' || code === 'aborted') && serverReady && !voiceState.preferServer) {
+          // 已登录：本次起自动改走服务端转写
           voiceState.preferServer = true;
           msg += ' 下次会自动改用服务器转写。';
-        } else if (code === 'network' && cloud.asr && !cloud.user) {
-          msg += ' 登录后可以改用服务器转写。';
         }
         if (code) msg += '（代码：' + code + '）';
         toast(msg);
@@ -1138,11 +1141,15 @@
     var native = Voice ? Voice.detect(window).browserSupported : false;
     var server = !!(cloud.asr);
     var usable = native || server;
+    var tip = !usable ? '当前环境不支持语音输入'
+      : (!cloud.user && server) ? '语音输入（登录后可稳定使用，微信里也行）'
+        : (native && !cloud.user) ? '语音输入（浏览器识别）'
+          : '语音输入';
     ['micInput', 'micAction', 'micNext'].forEach(function (id) {
       var btn = $('#' + id);
       if (!btn) return;
       btn.classList.toggle('hidden', !usable);
-      btn.title = native ? '语音输入（浏览器识别）' : (usable ? '语音输入（服务器转写，需登录）' : '当前环境不支持语音输入');
+      btn.title = tip;
     });
   }
 

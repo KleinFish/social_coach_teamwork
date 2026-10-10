@@ -35,9 +35,12 @@ report(tabs.length === 5, '标签页数量为 5（四个功能模块 + 社交画
 console.log('\n== 2c. 语音输入 ==');
 const voiceSrc = fs.readFileSync(path.join(dir, 'voice.js'), 'utf8');
 const voice = require('./voice.js');
-const scriptOrder2 = [...html.matchAll(/<script src="([^"]+)"/g)].map(m => m[1]);
+const stripQuery = (s) => s.replace(/\?.*$/, '');
+const scriptOrder2 = [...html.matchAll(/<script src="([^"]+)"/g)].map(m => stripQuery(m[1]));
 report(scriptOrder2.join(',') === 'coach-engine.js,assessment.js,voice.js,app.js',
   '脚本加载顺序正确：' + scriptOrder2.join(' → '));
+report(/<script src="[^"]+\?v=\d/.test(html) && /href="styles\.css\?v=\d/.test(html),
+  '前端资源带版本号（避免微信/浏览器缓存旧 JS 导致功能不生效）');
 report(['micInput', 'micAction', 'micNext', 'voiceBar', 'voiceStop'].every(id => htmlIds.has(id)),
   '三处输入框都配了麦克风按钮，并有全局录音状态条');
 report(/SocialVoice/.test(app) && /api\/transcribe/.test(app), 'app.js 已接入语音模块与服务端转写');
@@ -78,7 +81,7 @@ report(!/你应该/.test(assessSrc), '量表的题干与解读不含"你应该"'
 
 /* 回归：index.html 引用的每个前端文件都必须在服务端静态白名单里，
    否则线上会出现"首页正常、某个标签页 404"的隐蔽故障（真实踩过一次）。 */
-const scriptSrcs = [...html.matchAll(/<script src="([^"]+)"/g)].map(m => m[1]).map(s => '/' + s.replace(/^\//, ''));
+const scriptSrcs = [...html.matchAll(/<script src="([^"]+)"/g)].map(m => stripQuery(m[1])).map(s => '/' + s.replace(/^\//, ''));
 const publicBlock = /const PUBLIC_FILES = new Set\(\[([^\]]+)\]\)/.exec(server);
 report(!!publicBlock, '能解析出服务端的静态文件白名单');
 const publicFiles = publicBlock ? [...publicBlock[1].matchAll(/'([^']+)'/g)].map(m => m[1]) : [];
