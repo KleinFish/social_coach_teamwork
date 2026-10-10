@@ -9,6 +9,7 @@
 
   var E = window.CoachEngine;
   var Assess = window.SocialAssessment;
+  var Voice = window.SocialVoice;
   var PROFILE_KEY = 'social-coach.profile.v1';
   var CLOUD_KEY = 'social-coach.cloud.v1';
 
@@ -60,6 +61,7 @@
     user: null,
     revision: 0,
     llm: false,
+    asr: false,
     lastSync: null,
     autoSync: cloudPrefs.autoSync !== false,
     busy: false
@@ -359,9 +361,10 @@
   }
 
   function bootstrapCloud() {
-    if (!cloud.available) { renderCloud(); return; }
+    if (!cloud.available) { renderCloud(); renderVoiceButtons(); return; }
     apiJson('/api/health').then(function (res) {
       cloud.llm = !!(res.ok && res.data.llm);
+      cloud.asr = !!(res.ok && res.data.asr);
       return apiJson('/api/me');
     }).then(function (me) {
       if (me && me.ok) {
@@ -373,7 +376,7 @@
       renderCloud();
       renderMe();
       if (cloud.user) syncNow(false);
-    }).catch(function () { renderCloud(); });
+    }).catch(function () { renderCloud(); renderVoiceButtons(); });
   }
 
   function renderCloud() {
@@ -1008,6 +1011,109 @@
     submitQuiz();
   });
 
+  /* ---------------- 语音输入 ---------------- */
+  var voiceState = { session: null, button: null, field: null, base: '' };
+
+  function voiceMode() {
+    if (!Voice) return 'none';
+    return Voice.pickMode(window, { serverAvailable: !!(cloud.user && cloud.asr) });
+  }
+
+  function showVoiceBar(text) {
+    var bar = $('#voiceBar');
+    if (!bar) return;
+    if (!text) { bar.classList.add('hidden'); return; }
+    $('#voiceBarText').textContent = text;
+    bar.classList.remove('hidden');
+  }
+  function setVoiceButton(btn, active) { if (btn) btn.classList.toggle('rec', !!active); }
+
+  function stopVoice() {
+    if (voiceState.session) { voiceState.session.stop(); voiceState.session = null; }
+    setVoiceButton(voiceState.button, false);
+    showVoiceBar('');
+  }
+
+  function startVoice(fieldId, buttonId) {
+    var field = $('#' + fieldId);
+    var btn = $('#' + buttonId);
+    if (!field || !btn) return;
+    if (voiceState.session) { stopVoice(); return; }        // 再点一次＝停止
+
+    var mode = voiceMode();
+    if (mode === 'none') {
+      if (!cloud.available) toast('本地文件模式不支持语音输入，把网站部署到服务器上即可使用');
+      else if (!cloud.user && cloud.asr) toast('登录后就能用语音输入（服务器转写）；现在也可以直接手动输入');
+      else if (!cloud.asr) toast('服务器未配置语音转写，当前浏览器也不支持语音识别，请手动输入');
+      else toast('当前浏览器不支持语音输入，请手动输入');
+      return;
+    }
+
+    voiceState.button = btn;
+    voiceState.field = field;
+    voiceState.base = field.value ? field.value.replace(/\s+$/, '') + ' ' : '';
+    setVoiceButton(btn, true);
+    showVoiceBar(mode === 'browser' ? '正在聆听…（说完会自动结束）' : '录音中…（说完点「停止」）');
+
+    voiceState.session = Voice.createSession(window, {
+      mode: mode,
+      lang: 'zh-CN',
+      onPartial: function (text) { field.value = voiceState.base + text; },
+      onFinal: function (text) {
+        if (text) field.value = voiceState.base + text;
+        voiceState.session = null;
+        setVoiceButton(btn, false);
+        showVoiceBar('');
+        if (text) toast('已填入语音内容，可以改一改再提交');
+      },
+      onError: function (code, message) {
+        voiceState.session = null;
+        setVoiceButton(btn, false);
+        showVoiceBar('');
+        var msg = message || '语音输入没能完成';
+        // 浏览器内置识别常因网络不可用（国内尤甚）：如果服务器配了转写，引导用户登录后改走服务端
+        if (code === 'network' && cloud.asr && !cloud.user) {
+          msg += ' 登录后可以改用服务器转写。';
+        }
+        toast(msg);
+      },
+      onState: function (s) {
+        if (s === 'transcribing') showVoiceBar('正在转成文字…');
+        else if (s === 'idle') showVoiceBar('');
+      },
+      transcribe: function (b64, mime) {
+        return apiJson('/api/transcribe', {
+          method: 'POST',
+          body: JSON.stringify({ audioBase64: b64, mime: mime })
+        }).then(function (res) {
+          if (!res.ok) {
+            var err = new Error('transcribe failed');
+            err.code = (res.data && res.data.code) || 'transcribe-failed';
+            throw err;
+          }
+          return (res.data && res.data.text) || '';
+        });
+      }
+    });
+  }
+
+  function renderVoiceButtons() {
+    var native = Voice ? Voice.detect(window).browserSupported : false;
+    var server = !!(cloud.asr);
+    var usable = native || server;
+    ['micInput', 'micAction', 'micNext'].forEach(function (id) {
+      var btn = $('#' + id);
+      if (!btn) return;
+      btn.classList.toggle('hidden', !usable);
+      btn.title = native ? '语音输入（浏览器识别）' : (usable ? '语音输入（服务器转写，需登录）' : '当前环境不支持语音输入');
+    });
+  }
+
+  $('#micInput').addEventListener('click', function () { startVoice('input', 'micInput'); });
+  $('#micAction').addEventListener('click', function () { startVoice('rvAction', 'micAction'); });
+  $('#micNext').addEventListener('click', function () { startVoice('rvNext', 'micNext'); });
+  $('#voiceStop').addEventListener('click', function () { stopVoice(); });
+
   /* ---------------- 成长档案 ---------------- */
   function renderMe() {
     var st = E.stats(profile);
@@ -1065,6 +1171,7 @@
     $('#modePill').textContent = cloud.llm ? '大模型模式' : '本地规则引擎';
     $('#modePill').className = 'mode-pill' + (cloud.llm ? ' live' : '');
     renderAssessmentCard();
+    renderVoiceButtons();
     renderCloud();
   }
 
@@ -1213,6 +1320,7 @@
   renderReviewStage();
   renderCloud();
   renderMe();
+  renderVoiceButtons();
   welcome();
   bootstrapCloud();
   $('#input').focus();

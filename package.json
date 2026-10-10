@@ -6,7 +6,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node test-engine.js && node test-assessment.js && node check-wiring.js && node test-storage.js && node test-server.js && node smoke-dom.js && node test-e2e-cloud.js && node test-e2e-cloud.js --redis"
+    "test": "node test-engine.js && node test-assessment.js && node test-voice.js && node check-wiring.js && node test-storage.js && node test-server.js && node smoke-dom.js && node test-e2e-cloud.js && node test-e2e-cloud.js --redis"
   },
   "engines": {
     "node": ">=22.5.0"

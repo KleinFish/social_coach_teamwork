@@ -115,12 +115,25 @@ function startMock(mode) {
   const etag = js.headers.get('etag');
   const cached = await fetch(base + '/app.js', { headers: { 'If-None-Match': etag } });
   ok('支持 ETag 协商缓存（304）', cached.status === 304, String(cached.status));
-  ok('阻止原始路径穿越（/../server.js）', [403, 404].includes(await rawGet('/../server.js')));
+  ok('阻止路径穿越', [403, 404].includes(await rawGet('/../server.js')));
   ok('阻止编码路径穿越（%2f 到系统目录）', [403, 404].includes(await rawGet('/..%2f..%2fWindows%2fwin.ini')));
   ok('服务端源码不可下载', (await fetch(base + '/server.js')).status === 404);
   ok('测试脚本不可下载', (await fetch(base + '/test-server.js')).status === 404);
   ok('数据库文件不可下载', (await fetch(base + '/data/social-coach.db')).status === 404);
   ok('未知接口返回 JSON 404', (await fetch(base + '/api/nope')).status === 404);
+
+  /* 回归用例：index.html 里引用的每个脚本都必须真的能被访问到，
+     否则线上会出现"页面能开、某个标签页报错"的隐蔽故障。 */
+  const htmlText = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+  const scriptSrcs = [...htmlText.matchAll(/<script src="([^"]+)"/g)].map((m) => m[1]);
+  ok('首页确实引用了若干脚本', scriptSrcs.length >= 3, scriptSrcs.join(','));
+  for (const src of scriptSrcs) {
+    const res = await fetch(base + '/' + src.replace(/^\//, ''));
+    ok(`脚本 ${src} 可被访问且类型正确`, res.status === 200 && /javascript/.test(res.headers.get('content-type') || ''),
+      res.status + ' ' + res.headers.get('content-type'));
+  }
+  const styleRes = await fetch(base + '/styles.css');
+  ok('样式表可被访问', styleRes.status === 200 && /css/.test(styleRes.headers.get('content-type') || ''));
 
   section('健康检查');
   const health = await (await fetch(base + '/api/health')).json();
@@ -227,6 +240,54 @@ function startMock(mode) {
     await I.post('/api/auth/register', { username: '五百同学', password: 'password111' });
     ok('上游 500 → 502', (await I.post('/api/coach', { text: '聚餐' })).status === 502);
   } finally { await stopServer(appDead); deadMock.server.close(); base = mainBase; }
+
+  section('语音转写代理（本地 mock 上游，音频不落盘）');
+  const AUDIO = Buffer.from('fake-audio-bytes-for-test').toString('base64');
+  ok('未登录调用 → 401', (await new jar().post('/api/transcribe', { audioBase64: AUDIO, mime: 'audio/webm' })).status === 401);
+  const notCfg = await A.post('/api/transcribe', { audioBase64: AUDIO, mime: 'audio/webm' });
+  ok('未配置 ASR → 503 + asr_not_configured',
+    notCfg.status === 503 && notCfg.data.code === 'asr_not_configured', String(notCfg.status));
+
+  // 本地假 ASR 上游（OpenAI 兼容）
+  let asrCall = null;
+  const asrUpstream = http.createServer((req, res) => {
+    let raw = '';
+    req.on('data', (c) => { raw += c; });
+    req.on('end', () => {
+      asrCall = { auth: req.headers.authorization, bytes: raw.length, contentType: req.headers['content-type'] || '' };
+      if (/fail/.test(asrCall.auth || '')) { res.writeHead(500); res.end('boom'); return; }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ text: '明天课堂展示，我有点紧张' }));
+    });
+  });
+  const asrUrl = await new Promise((r) => asrUpstream.listen(0, '127.0.0.1', () => r('http://127.0.0.1:' + asrUpstream.address().port + '/v1/audio/transcriptions')));
+  const appAsr = createApp({ dataDir: tempDir('asr'), asr: { endpoint: asrUrl, model: 'whisper-1', key: 'asr-key' } });
+  await startServer(appAsr);
+  try {
+    const J = jar();
+    await J.post('/api/auth/register', { username: '语音同学', password: 'password222' });
+    const healthAsr = await (await fetch(base + '/api/health')).json();
+    ok('健康检查报告已配置语音转写', healthAsr.asr === true, JSON.stringify(healthAsr));
+    const good = await J.post('/api/transcribe', { audioBase64: AUDIO, mime: 'audio/webm' });
+    ok('转写成功并返回文本', good.status === 200 && good.data.text === '明天课堂展示，我有点紧张', JSON.stringify(good.data));
+    ok('上游收到的是 multipart 与 Bearer 密钥',
+      /multipart\/form-data/.test(asrCall.contentType) && asrCall.auth === 'Bearer asr-key', JSON.stringify(asrCall));
+    ok('上传体不为空（音频确实转发过去了）', asrCall.bytes > 100, String(asrCall.bytes));
+    ok('空音频被拒 400', (await J.post('/api/transcribe', { audioBase64: '', mime: 'audio/webm' })).status === 400);
+    const tooBig = await J.post('/api/transcribe', { audioBase64: 'A'.repeat(4 * 1024 * 1024 + 10), mime: 'audio/webm' });
+    ok('超长录音被拒（413 或 429）', [400, 413].includes(tooBig.status), String(tooBig.status));
+  } finally { await stopServer(appAsr); asrUpstream.close(); base = mainBase; }
+
+  const badAsr = http.createServer((req, res) => { res.writeHead(500); res.end('boom'); });
+  const badUrl = await new Promise((r) => badAsr.listen(0, '127.0.0.1', () => r('http://127.0.0.1:' + badAsr.address().port + '/v1/audio/transcriptions')));
+  const appBadAsr = createApp({ dataDir: tempDir('asr2'), asr: { endpoint: badUrl, model: 'm', key: 'k' } });
+  await startServer(appBadAsr);
+  try {
+    const K = jar();
+    await K.post('/api/auth/register', { username: '坏语音同学', password: 'password333' });
+    const bad = await K.post('/api/transcribe', { audioBase64: AUDIO, mime: 'audio/webm' });
+    ok('上游失败 → 502 + transcribe_failed', bad.status === 502 && bad.data.code === 'transcribe_failed', String(bad.status));
+  } finally { await stopServer(appBadAsr); badAsr.close(); base = mainBase; }
 
   section('限流（独立实例，避免污染其他用例）');
   const rlApp = createApp({ dataDir: tempDir('rl') });

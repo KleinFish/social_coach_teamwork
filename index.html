@@ -31,6 +31,7 @@
         <div class="suggest" id="suggest"></div>
         <div class="composer-inner">
           <textarea id="input" rows="1" placeholder="说说待会儿要面对的场景，比如：8 人聚餐，其中两个不太熟"></textarea>
+          <button class="mic-btn" id="micInput" type="button" title="语音输入">🎤</button>
           <button class="btn" id="sendBtn">发送</button>
         </div>
       </div>
@@ -78,6 +79,7 @@
         <div class="field">
           <label for="rvAction">我做了什么</label>
           <textarea id="rvAction" placeholder="例：先说了一句兜底的话，然后把话题交给对方"></textarea>
+          <button class="mic-btn inline" id="micAction" type="button">🎤 语音输入</button>
         </div>
         <div class="field">
           <label>效果</label>
@@ -86,6 +88,7 @@
         <div class="field">
           <label for="rvNext">下次想换的一个小动作（只写一个）</label>
           <textarea id="rvNext" placeholder="例：提前写好饭后离场的理由"></textarea>
+          <button class="mic-btn inline" id="micNext" type="button">🎤 语音输入</button>
         </div>
         <div class="row-between">
           <button class="btn" type="submit">完成复盘</button>
@@ -173,6 +176,7 @@
           <li>不采集身份信息，不要求手机号或邮箱，也不要求填写心理量表</li>
           <li>可以随时导出或一键清空本机数据</li>
           <li>登录后：复盘的明文副本会保存在你自己的账号下，仅凭密码可读取；请勿上传你不希望被服务器保存的内容</li>
+          <li>语音输入：音频只用于转成文字，服务器<b>不留存录音</b>；浏览器内置识别时不经过我们的服务器</li>
         </ul>
         <div class="row-between mt-11">
           <button class="btn ghost small" id="exportBtn">导出 JSON</button>
@@ -254,9 +258,15 @@
 </div>
 
 <div class="toast" id="toast"></div>
+<div class="voice-bar hidden" id="voiceBar">
+  <span class="dot-live"></span>
+  <span id="voiceBarText">正在聆听…</span>
+  <button class="btn small" id="voiceStop" type="button">停止</button>
+</div>
 
 <script src="coach-engine.js"></script>
 <script src="assessment.js"></script>
+<script src="voice.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

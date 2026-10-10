@@ -14,6 +14,7 @@ const dir = __dirname;
 const html = fs.readFileSync(path.join(dir, 'index.html'), 'utf8');
 const engineSrc = fs.readFileSync(path.join(dir, 'coach-engine.js'), 'utf8');
 const assessSrc = fs.readFileSync(path.join(dir, 'assessment.js'), 'utf8');
+const voiceSrc = fs.readFileSync(path.join(dir, 'voice.js'), 'utf8');
 const appSrc = fs.readFileSync(path.join(dir, 'app.js'), 'utf8');
 
 let pass = 0, fail = 0;
@@ -28,6 +29,7 @@ function boot(opts) {
   const ctx = vm.createContext(box.sandbox);
   vm.runInContext(engineSrc, ctx, { filename: 'coach-engine.js' });
   vm.runInContext(assessSrc, ctx, { filename: 'assessment.js' });
+  vm.runInContext(voiceSrc, ctx, { filename: 'voice.js' });
   ctx.CoachEngine = box.sandbox.window.CoachEngine || (box.sandbox.module && box.sandbox.module.exports);
   vm.runInContext(appSrc, ctx, { filename: 'app.js' });
   return box;
@@ -147,6 +149,53 @@ section('画像展示在档案里');
 ok('档案标签显示已测试', /已测试/.test($('assessTag').textContent), $('assessTag').textContent);
 ok('档案里也有雷达图与预测小结',
   $('assessBox').querySelectorAll('polygon').length >= 5 && /更需要借力/.test($('assessBox').textContent));
+
+section('语音输入（注入假的浏览器识别器）');
+ok('无语音能力时麦克风按钮隐藏', (function () {
+  const b = boot({ fetch: () => Promise.reject(new Error('offline')) });
+  return b.byId['micInput'].classList.contains('hidden') && b.byId['micAction'].classList.contains('hidden');
+})());
+
+/* 注入假 SpeechRecognition，走通"点击 → 识别 → 回填输入框"的完整链路 */
+class FakeSR {
+  constructor() { FakeSR.last = this; this.lang = ''; this.interimResults = false; }
+  start() { this.started = true; }
+  abort() { this.aborted = true; if (this.onend) this.onend(); }
+  emit(list) { this.onresult({ resultIndex: 0, results: list }); }
+  end() { if (this.onend) this.onend(); }
+}
+const vbox = createSandbox({ html, fetch: () => Promise.reject(new Error('offline')) });
+vbox.sandbox.window.SpeechRecognition = FakeSR;
+vbox.sandbox.SpeechRecognition = FakeSR;
+const vctx = vm.createContext(vbox.sandbox);
+vm.runInContext(engineSrc, vctx, { filename: 'coach-engine.js' });
+vm.runInContext(assessSrc, vctx, { filename: 'assessment.js' });
+vm.runInContext(voiceSrc, vctx, { filename: 'voice.js' });
+vm.runInContext(appSrc, vctx, { filename: 'app.js' });
+const $v = (id) => vbox.byId[id];
+ok('有识别能力时麦克风按钮显示', !$v('micInput').classList.contains('hidden'));
+$v('micInput').click();
+ok('点击后进入录音状态（按钮高亮 + 状态条出现）',
+  $v('micInput').classList.contains('rec') && !$v('voiceBar').classList.contains('hidden'));
+ok('状态条提示正在聆听', /聆听/.test($v('voiceBarText').textContent), $v('voiceBarText').textContent);
+ok('识别器按中文启动', FakeSR.last.lang === 'zh-CN' && FakeSR.last.started === true);
+FakeSR.last.emit([{ isFinal: false, 0: { transcript: '明天课堂展示' } }]);
+ok('中间结果实时回填到输入框', $v('input').value === '明天课堂展示', $v('input').value);
+FakeSR.last.emit([{ isFinal: true, 0: { transcript: '明天课堂展示，有点紧张' } }]);
+FakeSR.last.end();
+ok('最终结果写入输入框', /明天课堂展示，有点紧张/.test($v('input').value), $v('input').value);
+ok('结束后按钮与状态条复位',
+  !$v('micInput').classList.contains('rec') && $v('voiceBar').classList.contains('hidden'));
+$v('micInput').click();
+ok('第二次点击开始新的录音', !$v('voiceBar').classList.contains('hidden'));
+$v('voiceStop').click();
+ok('点「停止」可以中断', $v('voiceBar').classList.contains('hidden') && FakeSR.last.aborted === true);
+$v('micInput').click();
+FakeSR.last.onerror({ error: 'not-allowed' });
+ok('识别出错时给出提示并复位',
+  $v('voiceBar').classList.contains('hidden') && !$v('micInput').classList.contains('rec'));
+ok('录音字段也有麦克风按钮（复盘页两处）',
+  !$v('micAction').classList.contains('hidden') && !$v('micNext').classList.contains('hidden'));
 
 section('CSP 约束：页面内不允许内联样式属性');
 ok('HTML 中不含内联 style 属性', html.indexOf('style="') === -1);

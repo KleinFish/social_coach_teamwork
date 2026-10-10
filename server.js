@@ -28,6 +28,10 @@ const AUTH_WINDOW_MS = 10 * 60 * 1000;             // 登录/注册限流窗口
 const AUTH_MAX_ATTEMPTS = 30;
 const COACH_WINDOW_MS = 60 * 60 * 1000;            // 大模型代理限流窗口
 const COACH_MAX_CALLS = 40;
+const ASR_WINDOW_MS = 60 * 60 * 1000;              // 语音转写限流窗口
+const ASR_MAX_CALLS = 60;
+const ASR_BODY_LIMIT = 8 * 1024 * 1024;            // 转写请求体上限
+const ASR_AUDIO_B64_LIMIT = 4 * 1024 * 1024;       // base64 音频上限（约 3MB 音频，够 60 秒）
 const BODY_LIMIT = 1.5 * 1024 * 1024;              // 请求体上限（画像 < 1MB）
 
 /* ---------------- 口令与会话 ---------------- */
@@ -326,7 +330,7 @@ const MIME = {
 };
 /* 只对外暴露白名单内的前端文件：源码、测试脚本、数据库一律不可下载。
    注意：index.html 里 <script src> 引用的每个文件都必须在这里，否则线上会 404（见 test-server.js 的回归用例）。 */
-const PUBLIC_FILES = new Set(['/index.html', '/styles.css', '/app.js', '/coach-engine.js', '/assessment.js']);
+const PUBLIC_FILES = new Set(['/index.html', '/styles.css', '/app.js', '/coach-engine.js', '/assessment.js', '/voice.js']);
 
 function createApp(options) {
   const opts = options || {};
@@ -335,6 +339,12 @@ function createApp(options) {
     endpoint: process.env.LLM_ENDPOINT || '',
     model: process.env.LLM_MODEL || '',
     key: process.env.LLM_API_KEY || ''
+  };
+  /* 可选：语音转写（OpenAI 兼容的 /audio/transcriptions 接口）。音频只在内存里中转，不落盘。 */
+  const asr = opts.asr || {
+    endpoint: process.env.ASR_ENDPOINT || '',
+    model: process.env.ASR_MODEL || 'whisper-1',
+    key: process.env.ASR_API_KEY || ''
   };
   const secureCookies = opts.secureCookies !== undefined ? opts.secureCookies : process.env.SECURE_COOKIES === '1';
   const trustProxy = opts.trustProxy !== undefined ? opts.trustProxy : process.env.TRUST_PROXY === '1';
@@ -470,6 +480,7 @@ function createApp(options) {
       json(res, 200, {
         ok: true,
         llm: !!(llm.endpoint && llm.key && llm.model),
+        asr: !!(asr.endpoint && asr.key),
         storage: store.kind,
         time: new Date().toISOString()
       });
@@ -583,6 +594,44 @@ function createApp(options) {
       return;
     }
 
+    if (pathname === '/api/transcribe' && method === 'POST') {
+      if (!user) { json(res, 401, { error: '语音转写需要先登录' }); return; }
+      if (!(asr.endpoint && asr.key)) {
+        json(res, 503, { error: '服务器还没有配置语音转写', code: 'asr_not_configured' });
+        return;
+      }
+      const wait = rateLimit('asr:' + user.userId, ASR_MAX_CALLS, ASR_WINDOW_MS);
+      if (wait) { json(res, 429, { error: '语音输入过于频繁，请 ' + wait + ' 秒后再试' }); return; }
+      const body = await readBody(req, ASR_BODY_LIMIT);
+      const b64 = String(body.audioBase64 || '');
+      if (!b64) { json(res, 400, { error: '没有收到音频数据' }); return; }
+      if (b64.length > ASR_AUDIO_B64_LIMIT) { json(res, 413, { error: '这段录音太长了，说短一点再试', code: 'too-large' }); return; }
+      var buf;
+      try { buf = Buffer.from(b64, 'base64'); } catch (e) { json(res, 400, { error: '音频数据无法解析' }); return; }
+      if (!buf.length) { json(res, 400, { error: '音频数据为空' }); return; }
+      try {
+        const form = new FormData();
+        form.append('file', new Blob([buf], { type: String(body.mime || 'audio/webm') }), 'speech.webm');
+        form.append('model', asr.model || 'whisper-1');
+        const upstream = await fetch(asr.endpoint, {
+          method: 'POST',
+          headers: { Authorization: 'Bearer ' + asr.key },
+          body: form,
+          signal: AbortSignal.timeout(30000)
+        });
+        if (!upstream.ok) {
+          json(res, 502, { error: '转写服务返回 ' + upstream.status, code: 'transcribe_failed' });
+          return;
+        }
+        const data = await upstream.json();
+        const text = (data && (data.text || (data.data && data.data.text) || data.result)) || '';
+        json(res, 200, { text: String(text).trim(), chars: buf.length });
+      } catch (e) {
+        json(res, 502, { error: '转写失败：' + e.message, code: 'transcribe_failed' });
+      }
+      return;
+    }
+
     if (pathname === '/api/account' && method === 'DELETE') {
       if (!user) { json(res, 401, { error: '请先登录' }); return; }
       const body = await readBody(req, 32 * 1024);
@@ -632,7 +681,8 @@ function createApp(options) {
   return {
     server, store, close,
     storageKind: () => store.kind,
-    llmConfigured: () => !!(llm.endpoint && llm.key && llm.model)
+    llmConfigured: () => !!(llm.endpoint && llm.key && llm.model),
+    asrConfigured: () => !!(asr.endpoint && asr.key)
   };
 }
 
@@ -645,6 +695,7 @@ function start() {
     console.log('社交教练已启动：http://' + shown + ':' + port);
     console.log('存储方式：' + app.storageKind() + (app.storageKind() === 'sqlite' ? '（数据目录 ' + app.store.dataDir + '）' : '（外部 Redis）'));
     console.log('大模型代理：' + (app.llmConfigured() ? '已配置' : '未配置（使用本地规则引擎）'));
+    console.log('语音转写：' + (app.asrConfigured() ? '已配置' : '未配置（浏览器支持内置识别时仍可语音输入）'));
   });
   const shutdown = () => {
     console.log('\n正在关闭…');

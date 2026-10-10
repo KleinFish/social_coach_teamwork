@@ -10,7 +10,7 @@ WORKDIR /app
 
 # 只复制运行所需文件：源码、测试脚本、数据库都不会被打进镜像以外的地方
 COPY package.json ./
-COPY index.html styles.css app.js coach-engine.js assessment.js server.js ./
+COPY index.html styles.css app.js coach-engine.js assessment.js voice.js server.js ./
 
 RUN mkdir -p /data && chown -R node:node /app /data
 USER node

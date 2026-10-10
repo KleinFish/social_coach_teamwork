@@ -128,6 +128,22 @@ cloudflared tunnel --url http://127.0.0.1:8787   # 或 ngrok http 8787
 | `SECURE_COOKIES` | `0` | 置 `1` 时会话 Cookie 加 `Secure`（要求 HTTPS） |
 | `TRUST_PROXY` | `0` | 置 `1` 时信任 `X-Forwarded-For` / `X-Forwarded-Proto` |
 | `LLM_ENDPOINT` / `LLM_MODEL` / `LLM_API_KEY` | 空 | 三项齐全才启用大模型模式，否则用本地规则引擎 |
+| `ASR_ENDPOINT` / `ASR_API_KEY` / `ASR_MODEL` | 空 / `whisper-1` | 语音转写（OpenAI 兼容 `/audio/transcriptions`）；不填则只在浏览器支持内置识别时可用语音 |
+
+## 语音输入（打字的地方都可以说）
+
+「准备」页的场景描述框、以及「复盘」页的两个输入框，都带一个 🎤 按钮。语音输入做了**两层**：
+
+| 通道 | 条件 | 说明 |
+| --- | --- | --- |
+| 浏览器内置识别 | Chrome / Edge 等支持 Web Speech API | 零配置，边说边出字；**音频由浏览器厂商服务器处理**，不经过我们的服务器 |
+| 服务端转写 | 服务器配置了 `ASR_ENDPOINT` + `ASR_API_KEY`，且用户已登录 | 浏览器录音 → 上传到本服务 → 转发给 ASR 接口 → 返回文字；**音频只走内存、不落盘、不写日志** |
+
+选择逻辑：能用浏览器内置识别就优先用它；否则若服务器配了 ASR 就走服务端（需登录，防止接口被滥用）；两者都不可用时按钮直接隐藏，避免点了没反应。
+
+> 为什么不做「应急」页的语音：那里是 10 秒内拿一句话的场景，人在紧张时说不出话、现场也吵，所以坚持一键点击而不是语音——这一点也写进了课堂展示的 PPT。
+
+隐私：录音仅用于转成文字；服务端不保存音频文件，也没有把音频写进任何日志。相关说明同时出现在「档案 → 隐私与数据」里。
 
 ## 社交画像测试（40 题）
 
@@ -181,15 +197,16 @@ cloudflared tunnel --url http://127.0.0.1:8787   # 或 ngrok http 8787
 ```bash
 node test-engine.js              # 规则引擎：场景/压力/四模块/画像校验与合并（67 项）
 node test-assessment.js          # 社交画像量表：结构/反向计分/预测单调性/跨模块一致性（42 项）
+node test-voice.js               # 语音输入：能力探测/模式选择/两条通道/错误翻译（32 项）
 node check-wiring.js             # 静态联检：id、class、脚本顺序、密钥与网络约束（全部通过）
 node test-storage.js             # 存储契约：同一套断言跑 sqlite + 外部 Redis（58 项）
-node test-server.js              # 服务端 e2e：隔离、409 冲突、CSRF、限流、重启持久化（58 项）
-node smoke-dom.js                # 无浏览器 DOM 冒烟：离线模式 + file:// + 40 题完整作答（53 项）
+node test-server.js              # 服务端 e2e：隔离、409 冲突、CSRF、限流、重启持久化、大模型与语音代理（72 项）
+node smoke-dom.js                # 无浏览器 DOM 冒烟：离线模式 + file:// + 40 题作答 + 语音回填（65 项）
 node test-e2e-cloud.js           # 前端↔服务端集成：两台设备交替用同一账号（41 项）
 node test-e2e-cloud.js --redis   # 同上，但跑在外部 Redis 后端上（41 项）
 ```
 
-最近一次全量运行：**360 项断言全部通过**，静态联检全部通过。
+最近一次全量运行：**419 项断言全部通过**，静态联检全部通过。
 另外用 `curl` 与脚本对**线上实例**做过端到端验证（`https://social-coach-1lpl.onrender.com`：
 `storage: upstash`、注册 → 存数据 → 退出 → 重新登录数据仍在 → 删号清理）。
 

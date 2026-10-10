@@ -32,12 +32,25 @@ const tabs = [...html.matchAll(/data-tab="([\w-]+)"/g)].map(m => m[1]);
 tabs.forEach(t => report(htmlIds.has('panel-' + t), `data-tab="${t}" -> #panel-${t}`));
 report(tabs.length === 5, '标签页数量为 5（四个功能模块 + 社交画像测试）');
 
+console.log('\n== 2c. 语音输入 ==');
+const voiceSrc = fs.readFileSync(path.join(dir, 'voice.js'), 'utf8');
+const voice = require('./voice.js');
+const scriptOrder2 = [...html.matchAll(/<script src="([^"]+)"/g)].map(m => m[1]);
+report(scriptOrder2.join(',') === 'coach-engine.js,assessment.js,voice.js,app.js',
+  '脚本加载顺序正确：' + scriptOrder2.join(' → '));
+report(['micInput', 'micAction', 'micNext', 'voiceBar', 'voiceStop'].every(id => htmlIds.has(id)),
+  '三处输入框都配了麦克风按钮，并有全局录音状态条');
+report(/SocialVoice/.test(app) && /api\/transcribe/.test(app), 'app.js 已接入语音模块与服务端转写');
+report(/\/api\/transcribe/.test(server), '服务端提供转写代理接口');
+report(/ASR_ENDPOINT/.test(server) && !/ASR_API_KEY\s*[:=]\s*['"]/.test(server), '转写密钥只从环境变量读取，无硬编码');
+report(!/writeFile|appendFile/.test(server.split('transcribe')[1] ? server.split('transcribe')[1].slice(0, 2000) : ''),
+  '转写路径不写文件（音频不落盘）');
+report(/麦克风权限/.test(voice.mapError('not-allowed')), '错误提示是可读的中文');
+report(!/你应该/.test(voiceSrc), '语音模块文案不含"你应该"');
+
 console.log('\n== 2b. 社交画像测试 ==');
 const assess = require('./assessment.js');
 const assessSrc = fs.readFileSync(path.join(dir, 'assessment.js'), 'utf8');
-const scriptOrder = [...html.matchAll(/<script src="([^"]+)"/g)].map(m => m[1]);
-report(scriptOrder.join(',') === 'coach-engine.js,assessment.js,app.js',
-  '脚本加载顺序正确：' + scriptOrder.join(' → '));
 report(assess.itemCount() <= 48, `题库 ${assess.itemCount()} 题（上限 48）`);
 report(assess.DIMENSIONS.length === 8 && assess.DIMENSIONS.every(d => assess.ITEMS.filter(i => i.dim === d.key).length === 5),
   '8 个维度 × 5 题，结构完整');
@@ -49,6 +62,18 @@ report(/selfCheckDifficulty/.test(app) && /selfCheck/.test(fs.readFileSync(path.
   '画像结果会同时影响「准备」的回复');
 report(/recommendEmergency/.test(app), '画像结果会同时影响「应急」的推荐入口');
 report(!/你应该/.test(assessSrc), '量表的题干与解读不含"你应该"');
+
+/* 回归：index.html 引用的每个前端文件都必须在服务端静态白名单里，
+   否则线上会出现"首页正常、某个标签页 404"的隐蔽故障（真实踩过一次）。 */
+const scriptSrcs = [...html.matchAll(/<script src="([^"]+)"/g)].map(m => m[1]).map(s => '/' + s.replace(/^\//, ''));
+const publicBlock = /const PUBLIC_FILES = new Set\(\[([^\]]+)\]\)/.exec(server);
+report(!!publicBlock, '能解析出服务端的静态文件白名单');
+const publicFiles = publicBlock ? [...publicBlock[1].matchAll(/'([^']+)'/g)].map(m => m[1]) : [];
+publicFiles.push('/styles.css');
+const missingPublic = scriptSrcs.filter(s => !publicFiles.includes(s));
+report(missingPublic.length === 0,
+  `首页引用的 ${scriptSrcs.length} 个脚本都在静态白名单里` + (missingPublic.length ? '，缺失：' + missingPublic.join(', ') : ''));
+report(publicFiles.every(f => !/server\.js|test-|mock-upstash/.test(f)), '白名单里不含服务端源码或测试脚本');
 
 console.log('\n== 3. class 定义 ==');
 const used = new Set();
