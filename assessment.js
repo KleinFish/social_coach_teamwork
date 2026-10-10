@@ -112,6 +112,7 @@
     'eat-unfamiliar': { smalltalk: 0.8, stamina: 0.2 },
     'icebreaker': { smalltalk: 0.5, initiating: 0.3, stamina: 0.2 },
     'group-chat': { initiating: 0.5, improvising: 0.5 },
+    'wechat-first': { initiating: 0.6, smalltalk: 0.2, improvising: 0.2 },
     'party-strangers': { group: 0.6, initiating: 0.4 },
     'self-intro': { publicspeaking: 0.7, group: 0.3 },
     'approach-teacher': { authority: 0.7, initiating: 0.3 },

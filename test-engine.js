@@ -208,5 +208,63 @@ ok('元问题回复不含"你应该"', JSON.stringify(metaReply.blocks).indexOf(
 const normalReply = E.buildPrepReply('明天上午面试，有点紧张', null);
 ok('正常场景仍走完整准备流程', !normalReply.meta && normalReply.blocks.length >= 6);
 
+/* 14. 场景识别：线上加好友的第一句话（曾被误判成宿舍场景，给出"你几点睡"的错误建议） */
+section('场景识别准确性');
+ok('场景库共 13 类', E.SCENES.length === 13, String(E.SCENES.length));
+const wx = E.detectScenes('刚加了新同学微信，不知道怎么开口');
+ok('"刚加了新同学微信"命中线上场景而不是宿舍场景',
+  wx.length > 0 && wx[0].scene.id === 'wechat-first',
+  wx.map(function (x) { return x.scene.id + ':' + x.score; }).join(','));
+const wxReply = E.buildPrepReply('刚加了新同学微信，不知道怎么开口', null);
+ok('回传了命中的关键词（供解释判断依据）',
+  !!(wxReply.matched && wxReply.matched.keywords.length), JSON.stringify(wxReply.matched));
+ok('给出的是线上开场话术（不再是"你几点睡"）',
+  JSON.stringify(wxReply.blocks).indexOf('几点睡') === -1, JSON.stringify(wxReply.blocks).slice(0, 80));
+ok('话术里含可直接发的第一句', /加个好友|就加一下/.test(JSON.stringify(wxReply.blocks)));
+ok('"室友"类描述仍走宿舍场景', E.detectScenes('和室友第一次住一起，不知道聊什么')[0].scene.id === 'icebreaker');
+ok('每个场景的话术列表都非空（不渲染空分组）',
+  E.SCENES.every(function (s) {
+    return s.scripts.open && s.scripts.open.length && s.scripts.sustain && s.scripts.sustain.length &&
+      s.scripts.exit && s.scripts.exit.length;
+  }));
+ok('准备回复里不含空的"转话题"分组',
+  wxReply.blocks.every(function (b) {
+    return !b.groups || b.groups.every(function (g) { return g.items && g.items.length > 0; });
+  }));
+
+section('追问"你凭什么这么判断"');
+ok('这类追问能被识别', E.isWhyQuestion('为什么你觉得这是舍友见面') === true);
+ok('普通情绪提问不会被误判', E.isWhyQuestion('为什么我总是不敢说话') === false);
+const why = E.buildPrepReply('为什么你觉得这是舍友见面', null, {
+  lastScene: { id: 'icebreaker', name: '宿舍/新同学破冰', keywords: ['新同学'] }
+});
+ok('返回 why 标记', why.why === true);
+ok('如实说明是关键词匹配', /关键词/.test(JSON.stringify(why.blocks)));
+ok('说清了依据（命中的词与场景名）',
+  /新同学/.test(JSON.stringify(why.blocks)) && /宿舍/.test(JSON.stringify(why.blocks)));
+ok('不再回"听不懂产品问题"', JSON.stringify(why.blocks).indexOf('听不懂产品问题') === -1);
+ok('给出纠正方式', /不是宿舍/.test(JSON.stringify(why.blocks)));
+ok('没有上一次场景信息时不乱解释',
+  E.buildPrepReply('为什么你觉得这是舍友见面', null).why !== true);
+
+/* 15. 用户反馈修复：共情句按场景不同、去掉多余小字、场景切换可点 */
+section('用户反馈修复');
+const empAll = E.SCENES.map(function (s) { return E.empathyLine({ labels: [] }, s); });
+ok('13 个场景的第一句互不相同（原来所有场景都是同一句）',
+  empAll.every(function (t) { return t && t.length > 8; }) && new Set(empAll).size === empAll.length,
+  '唯一值 ' + new Set(empAll).size + '/' + empAll.length);
+const empA = E.buildPrepReply('明天上午面试，第一次', null).blocks[0].text;
+const empB = E.buildPrepReply('待会儿要参加一个 8 人聚餐，其中两个不太熟', null).blocks[0].text;
+ok('两个不同场景的第一句确实不一样', empA !== empB, empA + ' || ' + empB);
+const reframe = E.buildPrepReply('明天上午面试，第一次', null).blocks.filter(function (b) { return b.type === 'reframe'; })[0];
+ok('去掉了"报告里受访者最认可…"那行小字', !reframe.subtitle, JSON.stringify(reframe.subtitle));
+ok('整段回复里不再出现该文案',
+  JSON.stringify(E.buildPrepReply('明天上午面试，第一次', null).blocks).indexOf('受访者最认可') === -1);
+ok('社团面试不再被误判成求职面试',
+  E.detectScenes('要去社团面试，会群面')[0].scene.id === 'club-interview',
+  E.detectScenes('要去社团面试，会群面').map(function (x) { return x.scene.id; }).join(','));
+ok('求职/校招仍走求职面试',
+  E.detectScenes('校招终面，有点慌')[0].scene.id === 'job-interview');
+
 console.log('\n结果：' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

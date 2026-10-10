@@ -87,6 +87,7 @@ function startMock(mode) {
     let raw = '';
     req.on('data', c => { raw += c; });
     req.on('end', () => {
+      startMock.lastBody = raw;                     // 供断言 request body（如 max_tokens）
       if (mode === 'http500') { res.writeHead(500); res.end('boom'); return; }
       const blocks = [{ type: 'empathy', text: 'mock 共情' }, { type: 'script', title: '可以直接念的话', groups: [{ label: '开场', items: ['你好，我是 mock。'] }] }];
       const content = mode === 'ok' ? JSON.stringify({ blocks }) : mode === 'fenced' ? '```json\n' + JSON.stringify({ blocks }) + '\n```' : '这不是 JSON';
@@ -350,6 +351,64 @@ function startMock(mode) {
 
   await stopServer(app);
   fs.rmSync(dataDir, { recursive: true, force: true });
+  section('每日额度：防止"刷爆我的 token"');
+  const budgetMock = await startMock('ok');
+  const budgetDir = tempDir('budget');
+  const appBudget = createApp({
+    dataDir: budgetDir,
+    llm: { endpoint: budgetMock.url, model: 'm', key: 'k' },
+    budgets: { llmDaily: 2, llmIpDaily: 100, asrDaily: 0 }
+  });
+  await startServer(appBudget);
+  try {
+    const B = jar();
+    await B.post('/api/auth/register', { username: '额度同学', password: 'password444' });
+    const first = await B.post('/api/coach', { text: '明天面试' });
+    ok('第 1 次调用正常', first.status === 200 && first.data.source === 'llm', String(first.status));
+    ok('请求里带了 max_tokens 限制（单次成本可控）',
+      /"max_tokens":\s*\d+/.test(startMock.lastBody || '') && /"max_tokens":\s*(800|[1-9]\d{0,2})/.test(startMock.lastBody || ''),
+      (startMock.lastBody || '').slice(0, 120));
+    ok('第 2 次调用正常', (await B.post('/api/coach', { text: '明天面试' })).status === 200);
+    const third = await B.post('/api/coach', { text: '明天面试' });
+    ok('超出日额度后被拒（429 + llm_budget_exceeded）',
+      third.status === 429 && third.data.code === 'llm_budget_exceeded', third.status + ' ' + JSON.stringify(third.data));
+    const h = await (await fetch(base + '/api/health')).json();
+    ok('健康检查能看到今日用量与上限', h.llmUsed === 3 && h.llmDailyLimit === 2, JSON.stringify(h));
+  } finally { await stopServer(appBudget); }
+
+  // 关键：额度必须存在数据后端里，重启/休眠后不能清零
+  const appBudget2 = createApp({
+    dataDir: budgetDir,
+    llm: { endpoint: budgetMock.url, model: 'm', key: 'k' },
+    budgets: { llmDaily: 2, llmIpDaily: 100, asrDaily: 0 }
+  });
+  await startServer(appBudget2);
+  try {
+    const B2 = jar();
+    await B2.post('/api/auth/login', { username: '额度同学', password: 'password444' });
+    const afterRestart = await B2.post('/api/coach', { text: '明天面试' });
+    ok('**重启后额度不清零**（存在 Redis/SQLite 里，不是内存计数）',
+      afterRestart.status === 429, String(afterRestart.status));
+  } finally { await stopServer(appBudget2); budgetMock.server.close(); base = mainBase; }
+
+  // 单 IP 额度：批量注册小号也绕不过去
+  const ipMock = await startMock('ok');
+  const appIp = createApp({
+    dataDir: tempDir('budget-ip'),
+    llm: { endpoint: ipMock.url, model: 'm', key: 'k' },
+    budgets: { llmDaily: 0, llmIpDaily: 1, asrDaily: 0 }   // 账号额度不限，只限来源 IP
+  });
+  await startServer(appIp);
+  try {
+    const A1 = jar();
+    await A1.post('/api/auth/register', { username: '小号甲', password: 'password555' });
+    ok('同一 IP 的第 1 次正常', (await A1.post('/api/coach', { text: '聚餐' })).status === 200);
+    const A2 = jar();
+    await A2.post('/api/auth/register', { username: '小号乙', password: 'password556' });
+    const blocked = await A2.post('/api/coach', { text: '聚餐' });
+    ok('**换小号也绕不过 IP 额度**', blocked.status === 429 && blocked.data.code === 'llm_budget_exceeded', String(blocked.status));
+  } finally { await stopServer(appIp); ipMock.server.close(); base = mainBase; }
+
   console.log('\n结果：' + pass + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error('测试自身异常：', e); process.exit(1); });

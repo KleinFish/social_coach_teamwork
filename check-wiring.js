@@ -45,6 +45,13 @@ report(['micInput', 'micAction', 'micNext', 'voiceBar', 'voiceStop'].every(id =>
   '三处输入框都配了麦克风按钮，并有全局录音状态条');
 report(/SocialVoice/.test(app) && /api\/transcribe/.test(app), 'app.js 已接入语音模块与服务端转写');
 report(/\/api\/transcribe/.test(server), '服务端提供转写代理接口');
+report(/"max_tokens":\s*\d+|max_tokens:\s*\d+/.test(server), '大模型请求带 max_tokens（单次成本上限）');
+report(/LLM_DAILY_LIMIT/.test(server) && /ASR_DAILY_LIMIT/.test(server) && /llm_budget_exceeded/.test(server),
+  '大模型/转写都有每日额度兜底（防止刷爆部署者的钱）');
+report(/bumpCounter/.test(server) && /store\.bumpCounter\(todayKey/.test(server),
+  '额度计数落在数据后端里（重启不清零）');
+report(/bumpCounter/.test(server) && /peekCounter/.test(server) && /class SqliteStore[\s\S]*bumpCounter[\s\S]*class RedisStore[\s\S]*bumpCounter/.test(server),
+  '两个存储后端都实现了窗口计数器');
 report(/ASR_ENDPOINT/.test(server) && !/ASR_API_KEY\s*[:=]\s*['"]/.test(server), '转写密钥只从环境变量读取，无硬编码');
 report(!/writeFile|appendFile/.test(server.split('transcribe')[1] ? server.split('transcribe')[1].slice(0, 2000) : ''),
   '转写路径不写文件（音频不落盘）');
@@ -63,6 +70,16 @@ report(/preferServer/.test(app) && /prefer:\s*preferServer/.test(app),
 report(/normalizeTranscript/.test(app) && /normalizeTranscript/.test(voiceSrc),
   '识别结果经过文本清洗（去填充词/空格、补标点）');
 report(/\$\('#voiceBar'\)\.addEventListener\('click'/.test(app), '状态条整体可点按停止（手机上更容易按到）');
+
+/* 检查"用户可见文案"要先剥掉注释，否则会被我们自己的说明文字误判 */
+const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+report(!/场景按钮/.test(stripComments(app)), '不再出现"点下方场景按钮"这种找不到入口的措辞');
+report(/suggest-cap/.test(html) && /\.suggest-cap/.test(cssSrc), '输入框上方有"场景入口"提示');
+report(/alt-btn/.test(app) && /\.alt-btn/.test(cssSrc), '备选场景渲染成可点按钮');
+const engineSrc = fs.readFileSync(path.join(dir, 'coach-engine.js'), 'utf8');
+report(/SCENE_EMPATHY/.test(engineSrc), '共情首句按场景区分（不再所有场景同一句）');
+report(!/受访者最认可/.test(stripComments(engineSrc)), '已去掉"报告里受访者最认可的方式"这行小字');
+report(/score \+= a\.length/.test(engineSrc), '场景匹配按命中词长度加权（"社团面试"不会被"面试"压过）');
 
 console.log('\n== 2b. 社交画像测试 ==');
 const assess = require('./assessment.js');

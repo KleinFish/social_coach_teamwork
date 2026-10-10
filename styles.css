@@ -196,13 +196,24 @@ button { cursor: pointer; border: none; background: none; }
   flex: 1; border: none; resize: none; outline: none; background: transparent;
   max-height: 96px; min-height: 24px; line-height: 1.5; padding: 3px 2px;
 }
-.suggest { display: flex; gap: 7px; overflow-x: auto; padding: 9px 2px 2px; scrollbar-width: none; }
+.suggest { display: flex; gap: 7px; overflow-x: auto; padding: 7px 2px 2px; scrollbar-width: none; }
 .suggest::-webkit-scrollbar { display: none; }
+/* 提示"这里就是场景入口"——用户反馈过"提示我点场景按钮，但我找不到" */
+.suggest-cap { font-size: 11.5px; color: var(--muted); padding: 2px 2px 0; }
 .suggest button {
   flex: none; font-size: 12.5px; color: var(--ink-2); background: #fff;
   border: 1px solid var(--line); border-radius: 999px; padding: 6px 12px; white-space: nowrap;
 }
 .suggest button:hover { border-color: var(--primary); color: var(--primary); }
+/* 备选场景：点一下就能切换，不用再去找别的按钮 */
+.alt-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
+.alt-label { font-size: 12.5px; color: var(--muted); }
+.alt-btn {
+  border: 1px dashed var(--line); background: #fff; color: var(--primary);
+  border-radius: 999px; padding: 4px 10px; font-size: 12.5px; transition: .15s;
+}
+.alt-btn:hover { border-style: solid; border-color: var(--primary); background: var(--primary-soft); }
+.alt-hint { font-size: 11.5px; color: var(--muted); }
 
 /* ---------- 应急 ---------- */
 .sos-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 9px; }
@@ -318,8 +329,7 @@ button { cursor: pointer; border: none; background: none; }
 .sos-btn .rec { font-size: 11px; color: var(--primary); float: right; }
 .disclaimer { font-size: 12px; color: var(--ink-3); line-height: 1.6; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); }
 
-/* ---------- 语音输入 ---------- */
-/* 所有可点元素：禁止长按选中/复制、禁止 iOS 长按菜单，避免手势被浏览器接管 */
+/* ---------- 语音输入 ---------- *//* 所有可点元素：禁止长按选中/复制、禁止 iOS 长按菜单，避免手势被浏览器接管 */
 .mic-btn, .btn, .chip, .q-opt, .sos-btn, .nav-btn, .copy-btn, .tag {
   -webkit-user-select: none;
   user-select: none;

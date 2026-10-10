@@ -18,6 +18,8 @@ const ok = (name, cond, extra) => {
   if (cond) { pass++; console.log('  ok    ' + name); }
   else { fail++; console.log('  FAIL  ' + name + (extra !== undefined ? '  -> ' + extra : '')); }
 };
+const section = (t) => console.log('\n-- ' + t + ' --');
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /* ---------------- 本地 mock：Upstash REST 协议（见 mock-upstash.js） ---------------- */
 
@@ -125,6 +127,18 @@ async function runContract(label, makeApp) {
       (await app.store.countUsers()) + '/' + (await app.store.countProfiles()));
     await A.del('/api/account', { password: 'newpassword456' });
     ok('全部删除后计数为 0', (await app.store.countUsers()) === 0 && (await app.store.countProfiles()) === 0);
+
+    section('窗口计数器（每日额度靠它，两个后端行为必须一致）');
+    const c1 = await app.store.bumpCounter('budget:test:a', 60);
+    const c2 = await app.store.bumpCounter('budget:test:a', 60);
+    ok('首次自增为 1，之后累加', c1 === 1 && c2 === 2, c1 + ',' + c2);
+    ok('不同 key 互不影响', (await app.store.bumpCounter('budget:test:b', 60)) === 1);
+    ok('peekCounter 只读不增加', (await app.store.peekCounter('budget:test:a')) === 2);
+    ok('未创建的 key 读作 0', (await app.store.peekCounter('budget:test:never')) === 0);
+    const e1 = await app.store.bumpCounter('budget:test:exp', 1);
+    await sleep(1100);
+    const e2 = await app.store.bumpCounter('budget:test:exp', 1);
+    ok('窗口过期后重新计数（额度按天重置）', e1 === 1 && e2 === 1, e1 + ',' + e2);
 
     return app;
   } finally { /* 由调用方关闭 */ }

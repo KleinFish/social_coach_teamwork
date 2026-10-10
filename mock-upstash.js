@@ -8,7 +8,15 @@ const http = require('node:http');
 function startMockUpstash(token) {
   const kv = new Map();
   const sets = new Map();
+  const expires = new Map();
   let commands = 0;
+  /** 惰性处理过期，模拟 Redis 的 TTL 行为 */
+  const alive = (k) => {
+    if (!expires.has(k)) return true;
+    if (expires.get(k) > Date.now()) return true;
+    expires.delete(k); kv.delete(k); sets.delete(k);
+    return false;
+  };
 
   const server = http.createServer((req, res) => {
     let raw = '';
@@ -26,10 +34,11 @@ function startMockUpstash(token) {
         commands += 1;
         const cmd = String((args && args[0]) || '').toUpperCase();
         const k = args && args[1];
+        if (cmd === 'EXPIRE' || cmd === 'TTL') { /* 这两条自己处理过期 */ } else if (k) alive(k);
         switch (cmd) {
           case 'GET': return { result: kv.has(k) ? kv.get(k) : null };
-          case 'SET': kv.set(k, String(args[2])); sets.delete(k); return { result: 'OK' };
-          case 'DEL': { const had = kv.delete(k) | sets.delete(k); return { result: had ? 1 : 0 }; }
+          case 'SET': kv.set(k, String(args[2])); sets.delete(k); expires.delete(k); return { result: 'OK' };
+          case 'DEL': { const had = kv.delete(k) | sets.delete(k); expires.delete(k); return { result: had ? 1 : 0 }; }
           case 'SADD': {
             if (!sets.has(k)) sets.set(k, new Set());
             const before = sets.get(k).size;
@@ -40,6 +49,8 @@ function startMockUpstash(token) {
           case 'SMEMBERS': return { result: sets.has(k) ? [...sets.get(k)] : [] };
           case 'INCR': { const n = (parseInt(kv.get(k) || '0', 10) || 0) + 1; kv.set(k, String(n)); return { result: n }; }
           case 'DECR': { const n = (parseInt(kv.get(k) || '0', 10) || 0) - 1; kv.set(k, String(n)); return { result: n }; }
+          case 'EXPIRE': { if (!kv.has(k)) return { result: 0 }; expires.set(k, Date.now() + Number(args[2]) * 1000); return { result: 1 }; }
+          case 'TTL': { if (!kv.has(k)) return { result: -2 }; return { result: expires.has(k) ? Math.ceil((expires.get(k) - Date.now()) / 1000) : -1 }; }
           default: return { error: 'UNKNOWN_COMMAND' };
         }
       };

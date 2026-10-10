@@ -23,6 +23,7 @@ const crypto = require('node:crypto');
 const Engine = require('./coach-engine.js');
 
 const ROOT = __dirname;
+function envInt(v, dflt) { const n = parseInt(v, 10); return Number.isFinite(n) ? n : dflt; }
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;   // 30 天
 const AUTH_WINDOW_MS = 10 * 60 * 1000;             // 登录/注册限流窗口
 const AUTH_MAX_ATTEMPTS = 30;
@@ -86,6 +87,11 @@ class SqliteStore {
         revision   INTEGER NOT NULL DEFAULT 0,
         updated_at TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS counters (
+        key      TEXT PRIMARY KEY,
+        n        INTEGER NOT NULL,
+        exp_at   INTEGER NOT NULL
+      );
     `);
     this.q = {
       findUserByName: this.db.prepare('SELECT id, username, pass, created_at FROM users WHERE username_lower = ?'),
@@ -106,7 +112,11 @@ class SqliteStore {
                                                                         updated_at = excluded.updated_at`),
       deleteProfile: this.db.prepare('DELETE FROM profiles WHERE user_id = ?'),
       countUsers: this.db.prepare('SELECT COUNT(*) AS n FROM users'),
-      countProfiles: this.db.prepare('SELECT COUNT(*) AS n FROM profiles')
+      countProfiles: this.db.prepare('SELECT COUNT(*) AS n FROM profiles'),
+      getCounter: this.db.prepare('SELECT n, exp_at FROM counters WHERE key = ?'),
+      putCounter: this.db.prepare('INSERT INTO counters (key, n, exp_at) VALUES (?, ?, ?) ' +
+        'ON CONFLICT(key) DO UPDATE SET n = excluded.n, exp_at = excluded.exp_at'),
+      sweepCounters: this.db.prepare('DELETE FROM counters WHERE exp_at < ?')
     };
   }
   // 两种后端统一返回 {id, username, pass, createdAt}，避免上层依赖各自的字段风格
@@ -136,6 +146,20 @@ class SqliteStore {
   async deleteProfile(userId) { this.q.deleteProfile.run(userId); }
   async countUsers() { return this.q.countUsers.get().n; }
   async countProfiles() { return this.q.countProfiles.get().n; }
+  /** 窗口计数器：ttlSec 秒后归零。用于"每日额度"这类花真金白银的限流 */
+  async bumpCounter(key, ttlSec) {
+    const now = Date.now();
+    const row = this.q.getCounter.get(key);
+    const n = (row && row.exp_at > now) ? row.n + 1 : 1;
+    const exp = (row && row.exp_at > now) ? row.exp_at : now + ttlSec * 1000;
+    this.q.putCounter.run(key, n, exp);
+    return n;
+  }
+  async peekCounter(key) {
+    const row = this.q.getCounter.get(key);
+    return (row && row.exp_at > Date.now()) ? row.n : 0;
+  }
+  async sweepCounters(nowMs) { this.q.sweepCounters.run(nowMs); }
   close() { try { this.db.close(); } catch (e) { /* 已关闭 */ } }
 }
 
@@ -270,6 +294,13 @@ class RedisStore {
   }
   async countUsers() { return parseInt((await this.cmd(RedisStore.get('stat:users'))) || '0', 10); }
   async countProfiles() { return parseInt((await this.cmd(RedisStore.get('stat:profiles'))) || '0', 10); }
+  /** 窗口计数器：与 SqliteStore 行为一致（首次自增时设置过期时间） */
+  async bumpCounter(key, ttlSec) {
+    const n = parseInt((await this.cmd(['INCR', key])) || '0', 10);
+    if (n === 1) await this.cmd(['EXPIRE', key, String(ttlSec)]);
+    return n;
+  }
+  async peekCounter(key) { return parseInt((await this.cmd(RedisStore.get(key))) || '0', 10); }
   close() { /* 无本地资源 */ }
 }
 
@@ -348,6 +379,14 @@ function createApp(options) {
   };
   const secureCookies = opts.secureCookies !== undefined ? opts.secureCookies : process.env.SECURE_COOKIES === '1';
   const trustProxy = opts.trustProxy !== undefined ? opts.trustProxy : process.env.TRUST_PROXY === '1';
+  /* 花钱的接口做"全局日额度"兜底：即使有人批量注册账号，也刷不爆你的额度。
+     计数存在数据后端里（Redis/SQLite），所以免费实例休眠重启也不会清零。0 = 不限。 */
+  const budgets = Object.assign({
+    llmDaily: envInt(process.env.LLM_DAILY_LIMIT, 1000),
+    llmIpDaily: envInt(process.env.LLM_IP_DAILY_LIMIT, 200),
+    asrDaily: envInt(process.env.ASR_DAILY_LIMIT, 3000)
+  }, opts.budgets || {});
+  const DAY_SEC = 24 * 60 * 60;
 
   /* 内存限流：单进程足够；多实例部署时换成 Redis 即可 */
   const buckets = new Map();
@@ -362,6 +401,7 @@ function createApp(options) {
   const sweeper = setInterval(() => {
     const now = Date.now();
     Promise.resolve(store.sweepSessions(new Date(now).toISOString())).catch(() => {});
+    if (store.sweepCounters) Promise.resolve(store.sweepCounters(now)).catch(() => {});
     for (const [k, b] of buckets) if (b.resetAt < now) buckets.delete(k);
   }, 60 * 60 * 1000);
   if (sweeper.unref) sweeper.unref();
@@ -372,6 +412,22 @@ function createApp(options) {
       if (xff) return String(xff).split(',')[0].trim();
     }
     return req.socket.remoteAddress || 'unknown';
+  }
+  /* ---------------- 每日额度（保护钱包，而不是保护服务器） ---------------- */
+  function todayKey(prefix) { return 'budget:' + prefix + ':' + new Date().toISOString().slice(0, 10); }
+  /** 记一次消耗并判断是否超额度；存储异常时放行（宁可少省钱，也不能让服务不可用） */
+  async function spend(prefix, limit) {
+    if (!limit || limit <= 0) return { ok: true, used: 0, limit: 0 };
+    try {
+      const used = await store.bumpCounter(todayKey(prefix), DAY_SEC);
+      return { ok: used <= limit, used: used, limit: limit };
+    } catch (e) {
+      console.warn('[budget] 计数失败，本次放行：' + e.message);
+      return { ok: true, used: 0, limit: limit, degraded: true };
+    }
+  }
+  async function usedToday(prefix) {
+    try { return await store.peekCounter(todayKey(prefix)); } catch (e) { return 0; }
   }
   function isSecure(req) {
     if (secureCookies) return true;
@@ -448,6 +504,7 @@ function createApp(options) {
       body: JSON.stringify({
         model: llm.model || 'default',
         temperature: 0.6,
+        max_tokens: 800,          // 限制输出长度：单次成本可控，避免被超长回答放大开销
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },
           { role: 'user', content: '我的场景：' + text + '\n（画像：' + (tendency === 'i' ? '偏内向' : tendency === 'e' ? '偏外向' : '未设置') + '）' }
@@ -482,6 +539,11 @@ function createApp(options) {
         llm: !!(llm.endpoint && llm.key && llm.model),
         asr: !!(asr.endpoint && asr.key),
         storage: store.kind,
+        // 今日已用额度（方便部署者随时看还剩多少，避免"刷爆了才知道"）
+        llmUsed: await usedToday('llm'),
+        llmDailyLimit: budgets.llmDaily,
+        asrUsed: await usedToday('asr'),
+        asrDailyLimit: budgets.asrDaily,
         time: new Date().toISOString()
       });
       return;
@@ -580,6 +642,13 @@ function createApp(options) {
       if (!(llm.endpoint && llm.key && llm.model)) { json(res, 503, { error: '服务器未配置大模型，请使用本地规则引擎', code: 'llm_not_configured' }); return; }
       const wait = rateLimit('coach:' + user.userId, COACH_MAX_CALLS, COACH_WINDOW_MS);
       if (wait) { json(res, 429, { error: '调用过于频繁，请稍后再试' }); return; }
+      /* 每日额度：单账号刷号也刷不爆（账号级别 + 来源 IP 级别各一道） */
+      const uBudget = await spend('llm', budgets.llmDaily);
+      const ipBudget = await spend('llm-ip:' + clientIp(req), budgets.llmIpDaily);
+      if (!uBudget.ok || !ipBudget.ok) {
+        json(res, 429, { error: '今天的大模型额度已用完，已自动切换到本地模式', code: 'llm_budget_exceeded' });
+        return;
+      }
       const body = await readBody(req, 64 * 1024);
       const text = String(body.text || '').slice(0, 2000);
       if (!text.trim()) { json(res, 400, { error: '内容为空' }); return; }
@@ -602,6 +671,8 @@ function createApp(options) {
       }
       const wait = rateLimit('asr:' + user.userId, ASR_MAX_CALLS, ASR_WINDOW_MS);
       if (wait) { json(res, 429, { error: '语音输入过于频繁，请 ' + wait + ' 秒后再试' }); return; }
+      const asrBudget = await spend('asr', budgets.asrDaily);
+      if (!asrBudget.ok) { json(res, 429, { error: '今天的语音转写额度已用完', code: 'asr_budget_exceeded' }); return; }
       const body = await readBody(req, ASR_BODY_LIMIT);
       const b64 = String(body.audioBase64 || '');
       if (!b64) { json(res, 400, { error: '没有收到音频数据' }); return; }

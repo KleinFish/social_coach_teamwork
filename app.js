@@ -67,6 +67,7 @@
     busy: false
   };
   var reviewDraft = { triggers: [], effect: 'ok' };
+  var lastPrepScene = null;   // 上一次「准备」命中的场景 {id,name,keywords}，用于解释判断依据
 
   /* ---------------- 标签页 ---------------- */
   var navBtns = document.querySelectorAll('.nav-btn');
@@ -210,7 +211,16 @@
           box.appendChild(cm);
         }
         if (b.alternatives && b.alternatives.length) {
-          box.appendChild(el('div', 'soft-note', '也可能是：' + b.alternatives.join(' / ') + '（点下方场景按钮可以换）'));
+          // 用户反馈"提示我点场景按钮，但我找不到按钮"→ 直接把备选场景做成按钮，点一下就切换
+          var row = el('div', 'alt-row');
+          row.appendChild(el('span', 'alt-label', '也可能是：'));
+          b.alternatives.forEach(function (name) {
+            var btn = el('button', 'alt-btn', name);
+            btn.addEventListener('click', function () { send('就用「' + name + '」这个场景来准备'); });
+            row.appendChild(btn);
+          });
+          row.appendChild(el('span', 'alt-hint', '点一下即可切换'));
+          box.appendChild(row);
         }
         if (b.note) box.appendChild(el('div', 'soft-note', b.note));
         if (b.selfCheck) box.appendChild(el('div', 'soft-note', b.selfCheck));
@@ -466,7 +476,12 @@
           }]
         };
       }
-      return E.buildPrepReply(text, profile, { selfCheckDifficulty: selfCheckDifficultyFor(text) });
+      var reply = E.buildPrepReply(text, profile, {
+        selfCheckDifficulty: selfCheckDifficultyFor(text),
+        lastScene: lastPrepScene       // 记住上一次命中的场景，用户追问"你凭什么这么判断"时能说清依据
+      });
+      if (reply && reply.matched) lastPrepScene = reply.matched;
+      return reply;
     }
 
     var local = localReply();
@@ -651,8 +666,7 @@
     return dims ? Assess.predictScenes(dims, E.SCENES) : null;
   }
   /** 给「准备」模块用：这个场景在用户自评里的预测难度 */
-  function selfCheckDifficultyFor(text) {
-    var preds = currentPredictions();
+  function selfCheckDifficultyFor(text) {    var preds = currentPredictions();
     if (!preds) return null;
     var found = E.detectScenes(text, 1);
     if (!found.length) return null;
@@ -1426,7 +1440,7 @@
     var box = el('div', 'block');
     box.appendChild(el('div', 'b-title', '先说一句：紧张不是你的问题'));
     box.appendChild(el('div', 'line', '我是你的社交教练。告诉我待会儿要面对什么场景——几个人、熟不熟、要做什么，我用 30 秒给你状态调整和可以直接念出口的话。'));
-    box.appendChild(el('div', 'soft-note', '如果要立刻用，直接点下方任意场景；现场撑不住就切到「应急」。所有内容只存在你的设备里。'));
+    box.appendChild(el('div', 'soft-note', '不想打字的话，点输入框上面那排「场景」标签就行，一键开始；现场撑不住就切到「应急」。所有内容只存在你的设备里。'));
     addMessage('assistant', box);
     addMessage('assistant', '比如："8 人聚餐，其中两个不太熟，我有点紧张"。');
   }

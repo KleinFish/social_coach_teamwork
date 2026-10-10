@@ -339,6 +339,49 @@ FakeSRFailFast.count = 0;
     FakeSRFailFast.count === 2, '启动 ' + FakeSRFailFast.count + ' 次');
   FakeSRFailFast.count = 0;
 
+  /* ---------- 场景六：用户原话回归（微信开场跑偏 + 追问能不能解释依据） ---------- */
+  console.log('\n【场景六】用户原话：微信开场 + 追问依据');
+  const wbox = boot({ fetch: () => Promise.reject(new Error('offline')) });
+  const $w = (id) => wbox.byId[id];
+  const lastReply = () => $w('chat').childNodes[$w('chat').childNodes.length - 1].textContent;
+
+  $w('input').value = '刚加了新同学微信，不知道怎么开口';
+  $w('sendBtn').click();
+  await sleep(30);
+  const r1 = lastReply();
+  ok('第一句没有跑偏到宿舍场景（旧版会给"你几点睡"）', r1.indexOf('几点睡') === -1, r1.slice(0, 90));
+  ok('按"线上加了好友"场景给建议', /线上加了好友|第一句/.test(r1), r1.slice(0, 60));
+  ok('给了可以直接发的开场话术', /加个好友|就加一下/.test(r1), r1.slice(0, 120));
+
+  $w('input').value = '为什么你觉得这是舍友见面';
+  $w('sendBtn').click();
+  await sleep(30);
+  const r2 = lastReply();
+  ok('追问时不再回"听不懂产品问题"', r2.indexOf('听不懂产品问题') === -1, r2.slice(0, 90));
+  ok('如实说明是关键词匹配', /关键词/.test(r2), r2.slice(0, 90));
+  ok('并告诉用户怎么纠正', /不是宿舍|更具体/.test(r2), r2.slice(0, 140));
+
+  /* 用户反馈：提示"点场景按钮"但找不到按钮 → 备选场景现在直接可点 */
+  console.log('\n【场景七】找不到"场景按钮" → 备选场景改成可点按钮');
+  const altBox = boot({ fetch: () => Promise.reject(new Error('offline')) });
+  const $a = (id) => altBox.byId[id];
+  $a('input').value = '要去社团面试，会群面';
+  $a('sendBtn').click();
+  await sleep(30);
+  const alts = $a('chat').querySelectorAll('.alt-btn');
+  const textOf = (n) => (n.textContent || '') + ' ' + ((n.childNodes || []).map(textOf).join(' '));
+  ok('备选场景渲染成了按钮（不再是一句"点下方场景按钮"）', alts.length >= 1, '按钮数 ' + alts.length);
+  ok('页面上不再出现"场景按钮"这种找不到的措辞', textOf($a('chat')).indexOf('场景按钮') === -1);
+  const firstAlt = alts[0];
+  const altName = firstAlt && firstAlt.textContent;
+  if (firstAlt) firstAlt.click();
+  await sleep(30);
+  const r3 = textOf($a('chat').childNodes[$a('chat').childNodes.length - 1]);
+  ok('点一下备选场景就能切换（回复里出现该场景名）',
+    !!altName && r3.indexOf(altName) >= 0, '点了「' + altName + '」，回复：' + r3.slice(0, 70));
+  ok('输入框上方有"场景入口"的提示文案',
+    /不想打字/.test(html) && /suggest-cap/.test(html));
+
   console.log('\n结果：' + pass + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
 })();

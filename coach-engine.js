@@ -84,6 +84,24 @@
       checklist: ['把问题写成一句话，别攒成一长段', '发完把手机放下 20 分钟再回来看', '重要的事加一句"不急，方便时回"']
     },
     {
+      id: 'wechat-first', name: '线上加了好友，第一句怎么发', level: 2,
+      aliases: ['加了微信', '加微信', '微信上', '微信', '好友', '第一句', '第一句话', '打招呼', '怎么开口', '开场白', '刚加'],
+      stressor: '对方看不到你的表情、可能不回、担心第一句就说错',
+      reframe: [
+        '第一句的目标不是"聊起来"，而是"给对方一个好回复的落点"。',
+        '线上没有实时反馈是常态，没秒回不等于对方不想理你。'
+      ],
+      scripts: {
+        open: ['你好呀，我是××班的××，刚在群里看到你也在××，就加一下～',
+               '嗨，我是××，加个好友。你也是这学期才来××的吧？',
+               '你好！我是××，上次××活动上见过你，没来得及打招呼，加个好友～'],
+        sustain: ['你是什么时候开始关注××的呀？', '说起来，你这学期选了什么课？'],
+        shift: ['对了，你平时除了上课都干嘛？', '话说，你也是住校内吗？'],
+        exit: ['那我先去上课啦，回头聊～', '不打扰你啦，回头有空聊～']
+      },
+      checklist: ['第一句 = 自我介绍 + 一个由头（怎么认识的、有什么共同点）', '把问题放在末尾，让对方"一句话就能回"', '发完就把手机放下 20 分钟，别盯着"对方正在输入"']
+    },
+    {
       id: 'party-strangers', name: '参加多数人陌生的聚会', level: 3,
       aliases: ['聚会', 'party', '团建', '大家都不认识', '都不熟', '都是陌生人', '陌生聚会', '联谊'],
       stressor: '观众多、话题不受自己控制、随时可能被要求说话',
@@ -195,8 +213,8 @@
       checklist: ['准备一句结论句 + 一个理由', '把想说的写成三行，不写成一段', '想好"没有意见时也可以说的观察句"']
     },
     {
-      id: 'job-interview', name: '面试', level: 5,
-      aliases: ['面试', '实习面试', '校招', 'hr', '终面'],
+      id: 'job-interview', name: '求职面试', level: 5,
+      aliases: ['求职', '找工作', '应聘', '面试', '实习面试', '校招', 'hr', '终面'],
       stressor: '结果导向、被持续评估、几乎无容错空间',
       reframe: [
         '面试是双向筛选，你也在看他们把不把你当人看。',
@@ -271,10 +289,15 @@
     var scored = [];
     for (var i = 0; i < SCENES.length; i++) {
       var s = SCENES[i], score = 0;
+      /* 按**命中词的长度**加权，而不是命中个数：
+         "社团面试"（4 字）应当压过泛化的"面试"（2 字）。
+         早期版本用"+2 名称命中"，导致凡是提到"面试"都被判成"面试"场景。 */
       for (var j = 0; j < s.aliases.length; j++) {
-        if (hay.indexOf(norm(s.aliases[j])) >= 0) score += 1;
+        var a = norm(s.aliases[j]);
+        if (a && hay.indexOf(a) >= 0) score += a.length;
       }
-      if (hay.indexOf(norm(s.name)) >= 0) score += 2;
+      var nm = norm(s.name);
+      if (nm && hay.indexOf(nm) >= 0) score += nm.length;
       if (score > 0) scored.push({ scene: s, score: score });
     }
     scored.sort(function (a, b) { return b.score - a.score || a.scene.level - b.scene.level; });
@@ -355,6 +378,38 @@
     return isQuestion;
   }
 
+  /** 判断是不是"你怎么判断的"这类**针对我上一次分类**的追问 */
+  function isWhyQuestion(raw) {
+    var s = norm(raw);
+    if (/依据|根据什么|怎么判断|凭什么/.test(s)) return true;
+    return /(为什么|怎么|凭什么).{0,8}(觉得|认为|判断|猜|算|是这|说我)/.test(s);
+  }
+
+  /**
+   * 回答"为什么你觉得这是××场景"：老实交代是关键词匹配，
+   * 而不是像原来那样回一句"听不懂产品问题"（那对用户毫无帮助）。
+   */
+  function whyBlocks(last) {
+    var name = (last && last.name) || '某个场景';
+    var kws = (last && last.keywords) || [];
+    var hit = kws.length ? '「' + kws.slice(0, 4).join('」「') + '」' : '我库里的词';
+    return [
+      {
+        type: 'empathy',
+        text: '我不是真的"听懂"了，是按关键词匹配的：你上一条里出现了 ' + hit + '，对应我场景库里的「' + name + '」，所以给了那个场景的模板。'
+      },
+      {
+        type: 'checklist',
+        title: '猜错了直接告诉我',
+        items: [
+          '换一种更具体的说法，例如「线上刚加了好友，第一句怎么发」「和室友第一次同住」',
+          '或者直接纠正我：「不是宿舍，是××」，我就按新场景重来'
+        ],
+        hint: '（我只认关键词，所以偶尔会猜偏。想让这里真正"听懂"，需要在服务器配置大模型 LLM_API_KEY。）'
+      }
+    ];
+  }
+
   function metaBlocks() {
     return [
       {
@@ -375,8 +430,29 @@
   }
 
 
-  function empathyLine(emotion) {
-    if (!emotion.labels.length) return '这种情况很多人都会紧一下，你能提前来想这件事，本身就已经在处理它了。';
+  /* 每个场景的"第一句话"：用户反馈"所有场景都回同一句，太刻板"，
+     所以这里按场景给不同的收束，情绪识别命中时再叠加在情绪句后面。 */
+  var SCENE_EMPATHY = {
+    'ask-directions': '问路这件事容错很高——对方每天被问很多次，你问完就走了，没人会记得。',
+    'eat-unfamiliar': '和不熟的人吃饭本来就有"边吃边聊"的节奏，嚼东西的空档不用硬找话说。',
+    'icebreaker': '刚认识的同学、刚住到一起的室友，本来就不需要一次聊成朋友，先把日常信息交换清楚就够了。',
+    'wechat-first': '线上第一句其实比当面轻松：你可以慢慢打草稿，想好了再发，不用即时反应。',
+    'group-chat': '线上的沉默大多数时候只是"对方还没看到"，不等于不想理你。',
+    'party-strangers': '陌生场合里尴尬的不止你一个，多数人也在等别人先开口。',
+    'self-intro': '自我介绍只要能让人记住一个点就够了，不需要把整个人讲完。',
+    'approach-teacher': '老师通常希望学生来问，带着具体问题去，比"问得不够好"重要得多。',
+    'phone-stranger': '打电话最难的是开头三句，说完这三句，后面就顺了。',
+    'club-interview': '面试看的是合不合适，不是完不完美，一两个问题没答好不会翻盘。',
+    'class-present': '台下的人关心的是内容，不会盯着你的小失误。',
+    'meeting-speak': '会议上看的是信息有没有价值，不是表达得多漂亮。',
+    'job-interview': '面试是双向了解——你在被评估，同时也在评估对方。'
+  };
+
+  function empathyLine(emotion, scene) {
+    var note = (scene && SCENE_EMPATHY[scene.id]) || '';
+    if (!emotion.labels.length) {
+      return note || '这种感觉在这类场景里很常见，我们先把它安顿好，再看具体说什么。';
+    }
     var map = {
       physical: '身体先有反应是正常的，心跳快不等于你不行——它只是身体在预热。',
       cognitive: '"不知道说什么"不是你笨，是没有可用的话头，这个可以提前备。',
@@ -385,7 +461,8 @@
       depletion: '社交电量见底的时候，先别要求自己表现好，只要求自己到场。',
       eagerness: '你有一点期待，这是很好的起点，我们把它用在具体的一句话上。'
     };
-    return map[emotion.labels[0].key] || '这种感觉在这类场景里很常见，我们先处理它，再处理说什么。';
+    var base = map[emotion.labels[0].key] || '这种感觉在这类场景里很常见，我们先处理它，再处理说什么。';
+    return note ? base + ' ' + note : base;
   }
 
   function buildPrepReply(input, profile, opts) {
@@ -395,12 +472,22 @@
     if (crisis) return { blocks: [CRISIS_BLOCK], crisis: true };
 
     var found = detectScenes(text, 3);
-    // 产品/元问题：不走"猜场景"的老路，避免一本正经地胡说八道
+    // ① 追问"你凭什么觉得是××"：如实解释关键词匹配（比"听不懂产品问题"有用得多）
+    if (isWhyQuestion(text) && options.lastScene) {
+      return { blocks: whyBlocks(options.lastScene), why: true };
+    }
+    // ② 产品/元问题：不走"猜场景"的老路，避免一本正经地胡说八道
     if (!found.length && looksLikeMeta(text)) {
       return { blocks: metaBlocks(), meta: true };
     }
     var scene = found.length ? found[0].scene : getScene('party-strangers');
     var guess = !found.length;
+    /* 命中的关键词一并回传，前端记下来：用户下次追问"为什么"时能说清依据 */
+    var matched = found.length ? {
+      id: scene.id,
+      name: scene.name,
+      keywords: scene.aliases.filter(function (a) { return norm(text).indexOf(norm(a)) >= 0; })
+    } : null;
     var emotion = detectEmotions(text);
     var pressure = estimatePressure(scene.id, text, profile);
 
@@ -419,7 +506,7 @@
     }
 
     var blocks = [];
-    blocks.push({ type: 'empathy', text: empathyLine(emotion) });
+    blocks.push({ type: 'empathy', text: empathyLine(emotion, scene) });
     blocks.push({
       type: 'analysis',
       title: guess ? '我先按最接近的场景来准备' : '我听到的场景',
@@ -436,7 +523,7 @@
     blocks.push({
       type: 'reframe',
       title: '30 秒：先重新解释这份紧张',
-      subtitle: '报告里受访者最认可的方式——时间短、见效快',
+      // 原来这里有一行"报告里受访者最认可的方式"，用户反馈"这行字出现的必要性在于？"——去掉
       lines: scene.reframe
     });
     blocks.push({
@@ -449,12 +536,13 @@
     blocks.push({
       type: 'script',
       title: '可以直接念的话',
+      // 没有对应话术的分组直接不渲染，避免出现"转话题"下面空着
       groups: [
-        { label: '开场', items: scene.scripts.open },
-        { label: '接话', items: scene.scripts.sustain },
+        { label: '开场', items: scene.scripts.open || [] },
+        { label: '接话', items: scene.scripts.sustain || [] },
         { label: '转话题', items: scene.scripts.shift || [] },
-        { label: '离场兜底', items: scene.scripts.exit }
-      ]
+        { label: '离场兜底', items: scene.scripts.exit || [] }
+      ].filter(function (g) { return g.items && g.items.length > 0; })
     });
     blocks.push({
       type: 'checklist',
@@ -462,7 +550,7 @@
       items: scene.checklist,
       hint: '不用全部做完，挑一件做就够了；准备时间控制在 3 分钟以内。'
     });
-    return { scene: scene, pressure: pressure, emotion: emotion, blocks: blocks, crisis: false };
+    return { scene: scene, matched: matched, pressure: pressure, emotion: emotion, blocks: blocks, crisis: false };
   }
 
   /* ------------------------------------------------------------------ *
@@ -749,7 +837,11 @@
     soften: soften,
     pick: pick,
     detectScenes: detectScenes,
+    empathyLine: empathyLine,
+    SCENE_EMPATHY: SCENE_EMPATHY,
     looksLikeMeta: looksLikeMeta,
+    isWhyQuestion: isWhyQuestion,
+    whyBlocks: whyBlocks,
     metaBlocks: metaBlocks,
     getScene: getScene,
     estimatePressure: estimatePressure,

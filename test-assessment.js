@@ -82,7 +82,7 @@ ok('推荐的应急入口都真实存在',
   Object.keys(A.DIM_EMERGENCY).every((d) => E.EMERGENCY.some((t) => t.id === A.DIM_EMERGENCY[d])));
 
 section('场景预测');
-ok('预测覆盖全部 12 个场景', strong.scenes.length === sceneIds.length, String(strong.scenes.length));
+ok('预测覆盖全部 13 个场景', strong.scenes.length === sceneIds.length, String(strong.scenes.length));
 ok('强画像（全 100）所有场景难度都不高', strong.scenes.every((s) => s.difficulty <= 3.2),
   JSON.stringify(strong.scenes.map((s) => s.difficulty)));
 ok('弱画像（全 0）所有场景难度都偏高', weak.scenes.every((s) => s.difficulty >= 3.0),
