@@ -382,6 +382,44 @@ FakeSRFailFast.count = 0;
   ok('输入框上方有"场景入口"的提示文案',
     /不想打字/.test(html) && /suggest-cap/.test(html));
 
+  /* ---------- 场景八：场景库自我进化（前端注入 → 识别 → 档案展示） ---------- */
+  console.log('\n【场景八】场景库自我进化：注入 → 识别 → 档案展示');
+  const learnedScene = {
+    id: 'learned-night-store', name: '深夜便利店碰熟人', level: 2,
+    aliases: ['便利店', '深夜买东西', '碰到熟人'], stressor: '想躲又不想显得没礼貌',
+    reframe: ['买完东西就走也完全可以'],
+    scripts: { open: ['你也这么晚啊'], sustain: ['这附近还有别的地方开着吗'], shift: [], exit: ['我先回去啦，早点休息'] },
+    checklist: ['先决定要不要打招呼'], uses: 3, at: '2026-10-20T00:00:00.000Z'
+  };
+  const apiStub = (path) => {
+    if (/\/api\/health/.test(path)) return { ok: true, llm: true, asr: false, storage: 'stub', scenes: 1, sceneLearning: true };
+    if (/\/api\/scenes/.test(path)) return { ok: true, builtin: 13, learnedCount: 1, limit: 50, learning: true, scenes: [learnedScene] };
+    if (/\/api\/me/.test(path)) return null;
+    return null;
+  };
+  const fakeFetch = (path) => {
+    const data = apiStub(path);
+    return Promise.resolve({
+      ok: !!data, status: data ? 200 : 401,
+      json: () => Promise.resolve(data || { error: 'not logged in' })
+    });
+  };
+  const lbox = boot({ fetch: fakeFetch });
+  const $l = (id) => lbox.byId[id];
+  await sleep(60);
+  ok('启动时拉取了场景库并注入引擎', lbox.sandbox.CoachEngine.learnedScenes().length === 1,
+    String(lbox.sandbox.CoachEngine.learnedScenes().length));
+  ok('档案页标签显示已学会的数量', /已学会 1 类/.test($l('learnedTag').textContent), $l('learnedTag').textContent);
+  ok('档案页列出了学到的场景名', textOf($l('learnedBox')).indexOf('深夜便利店碰熟人') >= 0,
+    textOf($l('learnedBox')).slice(0, 60));
+  $l('input').value = '深夜下楼买点东西，在便利店碰到同层的熟人';
+  $l('sendBtn').click();
+  await sleep(40);
+  const learnedReply = textOf($l('chat').childNodes[$l('chat').childNodes.length - 1]);
+  ok('**学到的场景能被本地识别并给出它自己的话术**',
+    learnedReply.indexOf('深夜便利店碰熟人') >= 0 && learnedReply.indexOf('你也这么晚啊') >= 0,
+    learnedReply.slice(0, 90));
+
   console.log('\n结果：' + pass + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
 })();

@@ -283,12 +283,73 @@
 
   /* ------------------------------------------------------------------ *
    * 四、场景识别与压力分级
+   *    场景库 = 内置 13 类 + **从对话中学习到的场景**（由服务端下发）。
+   *    学习来的场景只增补、不覆盖内置场景。
    * ------------------------------------------------------------------ */
+  var LEARNED_SCENES = [];
+
+  /** 把服务端下发的场景整理成引擎能用的形状（防御式，缺字段给默认值） */
+  function normalizeSceneDoc(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    var name = String(raw.name == null ? '' : raw.name).trim();
+    if (!name) return null;
+    var id = String(raw.id || ('learned-' + name)).trim();
+    var level = parseInt(raw.level, 10);
+    if (!(level >= 1 && level <= 5)) level = 3;
+    var aliases = (Array.isArray(raw.aliases) ? raw.aliases : [])
+      .map(function (a) { return String(a == null ? '' : a).trim(); })
+      .filter(function (a) { return a.length >= 2 && a.length <= 10; });
+    if (!aliases.length) aliases = [name];
+    var scripts = raw.scripts && typeof raw.scripts === 'object' ? raw.scripts : {};
+    var pick = function (v) {
+      return (Array.isArray(v) ? v : []).map(function (t) { return String(t == null ? '' : t).trim(); })
+        .filter(function (t) { return t.length > 0; }).slice(0, 3);
+    };
+    return {
+      id: id, name: name, level: level, aliases: aliases,
+      stressor: String(raw.stressor || '').trim(),
+      reframe: pick(raw.reframe),
+      scripts: { open: pick(scripts.open), sustain: pick(scripts.sustain), shift: pick(scripts.shift), exit: pick(scripts.exit) },
+      checklist: pick(raw.checklist),
+      learned: true
+    };
+  }
+
+  /** 注入学习到的场景；返回当前学习场景总数。
+   *  同名/同关键词一律跳过——否则新学的场景会把内置场景的识别抢走
+   *  （真实踩过：学了名字叫"面试"的场景后，"明天上午面试"被判给学习场景）。 */
+  function extendScenes(list) {
+    if (!Array.isArray(list) || !list.length) return LEARNED_SCENES.length;
+    var seenName = {}, seenId = {}, builtinTerms = {};
+    SCENES.forEach(function (s) {
+      builtinTerms[norm(s.name)] = true;
+      (s.aliases || []).forEach(function (a) { builtinTerms[norm(a)] = true; });
+    });
+    var all = SCENES.concat(LEARNED_SCENES);
+    for (var i = 0; i < all.length; i++) { seenName[norm(all[i].name)] = true; seenId[all[i].id] = true; }
+    for (var j = 0; j < list.length; j++) {
+      var s = normalizeSceneDoc(list[j]);
+      if (!s) continue;
+      if (seenName[norm(s.name)] || seenId[s.id]) continue;
+      if (builtinTerms[norm(s.name)]) continue;                       // 名字撞内置
+      var clash = s.aliases.some(function (a) { return builtinTerms[norm(a)]; });
+      if (clash) continue;                                            // 关键词撞内置
+      seenName[norm(s.name)] = true;
+      seenId[s.id] = true;
+      LEARNED_SCENES.push(s);
+    }
+    return LEARNED_SCENES.length;
+  }
+  function allScenes() { return SCENES.concat(LEARNED_SCENES); }
+  function learnedScenes() { return LEARNED_SCENES.slice(); }
+  function resetLearnedScenes() { LEARNED_SCENES = []; return 0; }
+
   function detectScenes(text, limit) {
     var hay = norm(text);
     var scored = [];
-    for (var i = 0; i < SCENES.length; i++) {
-      var s = SCENES[i], score = 0;
+    var pool = allScenes();
+    for (var i = 0; i < pool.length; i++) {
+      var s = pool[i], score = 0;
       /* 按**命中词的长度**加权，而不是命中个数：
          "社团面试"（4 字）应当压过泛化的"面试"（2 字）。
          早期版本用"+2 名称命中"，导致凡是提到"面试"都被判成"面试"场景。 */
@@ -304,7 +365,8 @@
     return scored.slice(0, limit || 3);
   }
   function getScene(id) {
-    for (var i = 0; i < SCENES.length; i++) if (SCENES[i].id === id) return SCENES[i];
+    var pool = allScenes();
+    for (var i = 0; i < pool.length; i++) if (pool[i].id === id) return pool[i];
     return null;
   }
   var LEVEL_LABELS = ['', '轻松', '微紧张', '明显紧张', '高度紧张', '极强压力'];
@@ -837,6 +899,11 @@
     soften: soften,
     pick: pick,
     detectScenes: detectScenes,
+    allScenes: allScenes,
+    extendScenes: extendScenes,
+    learnedScenes: learnedScenes,
+    resetLearnedScenes: resetLearnedScenes,
+    normalizeSceneDoc: normalizeSceneDoc,
     empathyLine: empathyLine,
     SCENE_EMPATHY: SCENE_EMPATHY,
     looksLikeMeta: looksLikeMeta,

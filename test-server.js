@@ -90,7 +90,32 @@ function startMock(mode) {
       startMock.lastBody = raw;                     // 供断言 request body（如 max_tokens）
       if (mode === 'http500') { res.writeHead(500); res.end('boom'); return; }
       const blocks = [{ type: 'empathy', text: 'mock 共情' }, { type: 'script', title: '可以直接念的话', groups: [{ label: '开场', items: ['你好，我是 mock。'] }] }];
-      const content = mode === 'ok' ? JSON.stringify({ blocks }) : mode === 'fenced' ? '```json\n' + JSON.stringify({ blocks }) + '\n```' : '这不是 JSON';
+      const goodScene = {
+        name: '深夜便利店碰熟人', level: 2,
+        aliases: ['便利店', '深夜买东西', '碰到熟人'],
+        stressor: '想躲又不想显得没礼貌', reframe: ['买完东西就走也完全可以'],
+        scripts: { open: ['你也这么晚啊'], sustain: ['这附近还有别的地方开着吗'], exit: ['我先回去啦，早点休息'] },
+        checklist: ['先决定要不要打招呼']
+      };
+      let payload = { blocks };
+      let content;
+      if (mode === 'learn') { payload.newScene = goodScene; content = JSON.stringify(payload); }
+      else if (mode === 'learnbad') { payload.newScene = Object.assign({}, goodScene, { name: '面试' }); content = JSON.stringify(payload); }
+      else if (mode === 'learninvalid') {
+        payload.newScene = Object.assign({}, goodScene, { name: '便利店', aliases: ['深夜买东西'], scripts: { open: [], exit: [] } });
+        content = JSON.stringify(payload);
+      } else if (mode === 'huge') {
+        const long = '这是一段故意写得非常非常长的文本'.repeat(20);
+        content = JSON.stringify({
+          blocks: [
+            { type: 'empathy', text: long },
+            { type: 'analysis', title: long, scene: long, level: 9, factors: [{ text: long }, { text: long }, { text: long }, { text: long }] },
+            { type: 'script', title: long, groups: [{ label: long, items: [long, long, long, long] }] },
+            { type: 'checklist', title: long, items: [long, long, long, long, long] },
+            { type: 'reframe', lines: [long] }, { type: 'breath', text: long }, { type: 'empathy', text: '第五块' }
+          ]
+        });
+      } else content = mode === 'ok' ? JSON.stringify(payload) : mode === 'fenced' ? '```json\n' + JSON.stringify(payload) + '\n```' : '这不是 JSON';
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content } }] }));
     });
@@ -408,6 +433,87 @@ function startMock(mode) {
     const blocked = await A2.post('/api/coach', { text: '聚餐' });
     ok('**换小号也绕不过 IP 额度**', blocked.status === 429 && blocked.data.code === 'llm_budget_exceeded', String(blocked.status));
   } finally { await stopServer(appIp); ipMock.server.close(); base = mainBase; }
+
+  section('场景库自我进化（对话中学习新场景）');
+  const learnMock = await startMock('learn');
+  const learnApp = createApp({ dataDir: tempDir('scenes'), llm: { endpoint: learnMock.url, model: 'm', key: 'k' } });
+  await startServer(learnApp);
+  try {
+    const scenesEmpty = await (await fetch(base + '/api/scenes')).json();
+    ok('/api/scenes 公开可访问', scenesEmpty.builtin === 13 && scenesEmpty.learnedCount === 0, JSON.stringify(scenesEmpty).slice(0, 90));
+    ok('默认开启学习', scenesEmpty.learning === true);
+    const L = jar();
+    await L.post('/api/auth/register', { username: '进化同学', password: 'password777' });
+    const r1 = await L.post('/api/coach', { text: '深夜在楼下便利店碰到同层的熟人，想躲又不好意思' });
+    ok('第一次遇到新情境：返回回复并学习了一个场景',
+      r1.status === 200 && r1.data.learned && r1.data.learned.isNew === true, JSON.stringify(r1.data && r1.data.learned));
+    ok('学到的场景名正确', r1.data.learned.name === '深夜便利店碰熟人', r1.data.learned.name);
+    const afterOne = await (await fetch(base + '/api/scenes')).json();
+    ok('新场景已进入场景库', afterOne.learnedCount === 1 && afterOne.scenes[0].name === '深夜便利店碰熟人');
+    ok('场景库带回了 aliases / scripts（前端可直接用于识别）',
+      afterOne.scenes[0].aliases.indexOf('便利店') >= 0 && afterOne.scenes[0].scripts.open.length > 0);
+    const r2 = await L.post('/api/coach', { text: '深夜在楼下便利店碰到同层的熟人，想躲又不好意思' });
+    ok('第二次同一场景：不算新增，而是累加使用次数',
+      r2.data.learned && r2.data.learned.isNew === false && r2.data.learned.uses === 2, JSON.stringify(r2.data.learned));
+    ok('场景库仍然只有 1 类', (await (await fetch(base + '/api/scenes')).json()).learnedCount === 1);
+    const promptBody = startMock.lastBody;
+    ok('提示词里带上了已有场景清单（避免重复造场景）', /已有场景/.test(promptBody) && /面试/.test(promptBody));
+    ok('提示词要求模型只在装不下时给 newScene', /newScene/.test(promptBody));
+    ok('max_tokens 仍是 800（成本可控）', /"max_tokens":\s*800/.test(promptBody));
+  } finally { await stopServer(learnApp); learnMock.server.close(); base = mainBase; }
+
+  // 不合规的新场景不该污染场景库
+  for (const [mode, label] of [['learnbad', '名字与内置场景关键词冲突'], ['learninvalid', '话术/aliases 不完整']]) {
+    const m = await startMock(mode);
+    const a = createApp({ dataDir: tempDir('scenes-bad-' + mode), llm: { endpoint: m.url, model: 'm', key: 'k' } });
+    await startServer(a);
+    try {
+      const J2 = jar();
+      await J2.post('/api/auth/register', { username: '坏场景' + mode, password: 'password888' });
+      const r = await J2.post('/api/coach', { text: '随便说点什么场景' });
+      ok('不合规的新场景被拒收（' + label + '）', r.status === 200 && r.data.learned === null, JSON.stringify(r.data && r.data.learned));
+      ok('被拒后场景库仍是空的（' + label + '）', (await (await fetch(base + '/api/scenes')).json()).learnedCount === 0);
+    } finally { await stopServer(a); m.server.close(); base = mainBase; }
+  }
+
+  // 关闭学习 / 达到上限
+  const offMock = await startMock('learn');
+  const offApp = createApp({ dataDir: tempDir('scenes-off'), llm: { endpoint: offMock.url, model: 'm', key: 'k' }, sceneLearning: false });
+  await startServer(offApp);
+  try {
+    const K2 = jar();
+    await K2.post('/api/auth/register', { username: '关闭学习', password: 'password999' });
+    const r = await K2.post('/api/coach', { text: '深夜在楼下便利店碰到熟人' });
+    ok('SCENE_LEARNING=0 时不会学习', r.status === 200 && r.data.learned === null);
+  } finally { await stopServer(offApp); offMock.server.close(); base = mainBase; }
+
+  const capMock = await startMock('learn');
+  const capApp = createApp({ dataDir: tempDir('scenes-cap'), llm: { endpoint: capMock.url, model: 'm', key: 'k' }, sceneLimit: 0 });
+  await startServer(capApp);
+  try {
+    const C2 = jar();
+    await C2.post('/api/auth/register', { username: '上限同学', password: 'password000' });
+    const r = await C2.post('/api/coach', { text: '深夜在楼下便利店碰到熟人' });
+    ok('达到场景库上限后不再新增', r.status === 200 && r.data.learned === null);
+  } finally { await stopServer(capApp); capMock.server.close(); base = mainBase; }
+
+  // 模型输出失控时，服务端要裁剪（不能让一整屏文字糊上来）
+  const hugeMock = await startMock('huge');
+  const hugeApp = createApp({ dataDir: tempDir('huge'), llm: { endpoint: hugeMock.url, model: 'm', key: 'k' } });
+  await startServer(hugeApp);
+  try {
+    const H = jar();
+    await H.post('/api/auth/register', { username: '话痨同学', password: 'password111' });
+    const r = await H.post('/api/coach', { text: '明天面试' });
+    ok('块数量被裁到 4 个以内', r.status === 200 && r.data.blocks.length <= 4, String(r.data.blocks.length));
+    const longest = Math.max.apply(null, r.data.blocks.map((b) => (b.text || '').length));
+    ok('单块正文被裁到 121 字以内', longest <= 121, String(longest));
+    const grp = r.data.blocks.filter((b) => b.type === 'script')[0];
+    ok('每组话术最多 3 条', grp && grp.groups[0].items.length <= 3, JSON.stringify(grp && grp.groups[0].items.length));
+    const ana = r.data.blocks.filter((b) => b.type === 'analysis')[0];
+    ok('level 被夹到 1–5', ana && ana.level === 5, JSON.stringify(ana && ana.level));
+    ok('factors 最多 3 条', ana && ana.factors.length <= 3, JSON.stringify(ana && ana.factors.length));
+  } finally { await stopServer(hugeApp); hugeMock.server.close(); base = mainBase; }
 
   console.log('\n结果：' + pass + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);

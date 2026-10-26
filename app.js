@@ -314,8 +314,50 @@
   function serverCoach(text) {
     if (!cloud.available || !cloud.user || !cloud.llm) return Promise.resolve(null);
     return apiJson('/api/coach', { method: 'POST', body: JSON.stringify({ text: text }) })
-      .then(function (res) { return res.ok && res.data.blocks ? res.data.blocks : null; })
+      .then(function (res) {
+        if (!res.ok || !res.data.blocks) return null;
+        return { blocks: res.data.blocks, learned: res.data.learned || null };
+      })
       .catch(function () { return null; });
+  }
+
+  /**
+   * 场景库自我进化（前端一侧）：
+   * 服务端会在对话中学习新场景；这里把「内置 + 已学习」注入引擎，
+   * 之后本地识别也能认出这些新场景（断网时同样生效）。
+   */
+  var learnedInfo = { count: 0, limit: 0, names: [] };
+  function loadLearnedScenes() {
+    if (!cloud.available) { renderLearned(); return Promise.resolve(false); }
+    return apiJson('/api/scenes').then(function (res) {
+      if (!res.ok || !res.data) return false;
+      var list = res.data.scenes || [];
+      if (E.extendScenes) E.extendScenes(list);
+      learnedInfo = {
+        count: list.length,
+        limit: res.data.limit || 0,
+        names: list.map(function (s) { return s.name; })
+      };
+      renderLearned();
+      return true;
+    }).catch(function () { return false; });
+  }
+  function renderLearned() {
+    var box = $('#learnedBox');
+    var tag = $('#learnedTag');
+    if (tag) tag.textContent = learnedInfo.count ? '已学会 ' + learnedInfo.count + ' 类' : '场景库';
+    if (!box) return;
+    box.innerHTML = '';
+    if (!learnedInfo.count) {
+      box.appendChild(el('p', 'hint', '还没有学过新场景。在「准备」里描述一个现有 13 类装不下的情境，它会自己学一类进来。'));
+      return;
+    }
+    var head = el('p', 'hint', '已从对话中学会 ' + learnedInfo.count + ' 类新场景' +
+      (learnedInfo.limit ? '（上限 ' + learnedInfo.limit + '）' : '') + '：');
+    box.appendChild(head);
+    var wrap = el('div', 'chips-mini');
+    learnedInfo.names.forEach(function (n) { wrap.appendChild(el('span', null, n)); });
+    box.appendChild(wrap);
   }
 
   var syncTimer = null;
@@ -487,14 +529,22 @@
     var local = localReply();
     if (local.crisis || !cloud.user || !cloud.llm) { show(local.blocks); return; }
 
-    serverCoach(text).then(function (blocks) {
-      if (blocks && blocks.length) {
-        var normalized = blocks.slice();
+    serverCoach(text).then(function (res) {
+      if (res && res.blocks && res.blocks.length) {
+        var normalized = res.blocks.slice();
         if (normalized[0].type !== 'empathy') {
           normalized.unshift({ type: 'empathy', text: '先说一句：在任何场景里紧一下，都是很常见的反应。' });
         }
         show(normalized);
-        toast('已由大模型生成');
+        if (res.learned) {
+          // 场景库自己长了一类：告诉用户，并立刻把新场景拉下来供下次使用
+          toast(res.learned.isNew
+            ? '学到了新场景：「' + res.learned.name + '」已加入场景库'
+            : '「' + res.learned.name + '」这个场景又用了一次');
+          loadLearnedScenes();
+        } else {
+          toast('已由大模型生成');
+        }
       } else {
         show(local.blocks);
         toast('大模型暂时不可用，已用本地引擎回答');
@@ -1450,7 +1500,9 @@
   renderCloud();
   renderMe();
   renderVoiceButtons();
+  renderLearned();
   welcome();
   bootstrapCloud();
+  loadLearnedScenes();   // 把服务端学到的场景注入本地引擎（公开接口，不需要登录）
   $('#input').focus();
 })();

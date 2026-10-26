@@ -266,5 +266,43 @@ ok('社团面试不再被误判成求职面试',
 ok('求职/校招仍走求职面试',
   E.detectScenes('校招终面，有点慌')[0].scene.id === 'job-interview');
 
+/* 16. 场景库自我进化：学习来的场景要能被识别，且不能覆盖内置场景 */
+section('场景库自我进化');
+const learnedSample = {
+  id: 'learned-night-snack',
+  name: '宿舍楼下夜宵拼桌',
+  level: 2,
+  aliases: ['夜宵', '拼桌', '楼下等人'],
+  stressor: '临时凑一起，没话找话还怕冷场',
+  reframe: ['凑一桌本来就是为了吃，不用聊得多好'],
+  scripts: { open: ['你们也来买夜宵啊？'], sustain: ['这家哪样好吃？'], exit: ['我先回去啦，慢慢吃'] },
+  checklist: ['先聊吃的，别急着聊别的']
+};
+ok('默认没有学习场景', E.learnedScenes().length === 0);
+ok('注入学习场景后总数 = 内置 + 学习',
+  E.extendScenes([learnedSample]) === 1 && E.allScenes().length === E.SCENES.length + 1,
+  E.allScenes().length + '');
+const learnHit = E.detectScenes('晚上下楼买夜宵，碰到同层的人一起拼桌');
+ok('学习场景能被识别出来', learnHit[0] && learnHit[0].scene.name === '宿舍楼下夜宵拼桌',
+  learnHit[0] && learnHit[0].scene.name);
+ok('学习场景被标记为 learned', learnHit[0].scene.learned === true);
+const learnReply = E.buildPrepReply('晚上下楼买夜宵，碰到同层的人一起拼桌', null);
+ok('学习场景的话术来自它自己的数据',
+  JSON.stringify(learnReply.blocks).indexOf('你们也来买夜宵啊') >= 0);
+ok('同名场景重复注入不会重复',
+  E.extendScenes([learnedSample]) === 1 && E.allScenes().length === E.SCENES.length + 1);
+ok('与内置场景同名的学习场景会被忽略',
+  E.extendScenes([{ name: '面试', level: 3 }]) === 1, E.learnedScenes().length + '');
+ok('内置场景仍然优先于未命中的学习场景',
+  E.detectScenes('明天上午面试')[0].scene.id === 'job-interview');
+ok('getScene 能找到学习场景', E.getScene('learned-night-snack') !== null);
+ok('normalizeSceneDoc 会给缺字段兜底',
+  (function () {
+    const s = E.normalizeSceneDoc({ name: '临时状况' });
+    return s && s.level === 3 && s.aliases[0] === '临时状况' && s.learned === true;
+  })());
+ok('normalizeSceneDoc 拒绝空名字', E.normalizeSceneDoc({ name: '  ' }) === null);
+ok('resetLearnedScenes 能清空', E.resetLearnedScenes() === 0 && E.allScenes().length === E.SCENES.length);
+
 console.log('\n结果：' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

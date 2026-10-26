@@ -128,6 +128,28 @@ async function runContract(label, makeApp) {
     await A.del('/api/account', { password: 'newpassword456' });
     ok('全部删除后计数为 0', (await app.store.countUsers()) === 0 && (await app.store.countProfiles()) === 0);
 
+    section('场景库（对话中学到的场景）');
+    ok('初始没有学习场景', (await app.store.countScenes()) === 0);
+    const sceneDoc = {
+      id: 'learned-test', name: '测试场景', level: 2, aliases: ['测试词'],
+      stressor: '测试压力来源', reframe: ['换个说法'],
+      scripts: { open: ['开场句'], sustain: [], shift: [], exit: ['离场句'] },
+      checklist: ['一个小动作'], learned: true
+    };
+    const created = await app.store.upsertScene('learned-test', sceneDoc, '2026-10-01T00:00:00.000Z');
+    ok('写入后能读回完整内容', created && created.doc.name === '测试场景' && created.uses === 1, JSON.stringify(created && created.uses));
+    ok('列表里能查到', (await app.store.listScenes()).length === 1);
+    ok('计数正确', (await app.store.countScenes()) === 1);
+    const bumped = await app.store.bumpScene('learned-test', '2026-10-02T00:00:00.000Z');
+    ok('再次命中会累加 uses 并更新 updatedAt',
+      bumped && bumped.uses === 2 && bumped.updatedAt === '2026-10-02T00:00:00.000Z', JSON.stringify(bumped && bumped.uses));
+    ok('重复 upsert 不会变成两条、也不会重置 uses',
+      (await (async () => { await app.store.upsertScene('learned-test', sceneDoc, '2026-10-03T00:00:00.000Z'); return app.store.countScenes(); })()) === 1);
+    ok('getScene 能按 id 取到', (await app.store.getScene('learned-test')).doc.level === 2);
+    ok('取不存在的场景返回 null', (await app.store.getScene('nope')) === null);
+    await app.store.deleteScene('learned-test');
+    ok('删除后计数归零且取不到', (await app.store.countScenes()) === 0 && (await app.store.getScene('learned-test')) === null);
+
     section('窗口计数器（每日额度靠它，两个后端行为必须一致）');
     const c1 = await app.store.bumpCounter('budget:test:a', 60);
     const c2 = await app.store.bumpCounter('budget:test:a', 60);

@@ -81,6 +81,33 @@ report(/SCENE_EMPATHY/.test(engineSrc), '共情首句按场景区分（不再所
 report(!/受访者最认可/.test(stripComments(engineSrc)), '已去掉"报告里受访者最认可的方式"这行小字');
 report(/score \+= a\.length/.test(engineSrc), '场景匹配按命中词长度加权（"社团面试"不会被"面试"压过）');
 
+console.log('\n== 2d. 大模型接入自检工具 ==');
+const checkLlmPath = path.join(dir, 'check-llm.js');
+report(fs.existsSync(checkLlmPath), '提供可运行的本地自检脚本 check-llm.js');
+const checkLlmSrc = fs.readFileSync(checkLlmPath, 'utf8');
+report(/require\('\.\/server\.js'\)/.test(checkLlmSrc) && /LLM_SYSTEM_PROMPT/.test(checkLlmSrc),
+  '自检脚本复用服务端同一份系统提示词（不会两边跑偏）');
+report(/max_tokens:\s*800/.test(checkLlmSrc) && /max_tokens:\s*800/.test(server),
+  '自检请求与线上请求的 max_tokens 一致');
+report(!/sk-[A-Za-z0-9]{20,}/.test(checkLlmSrc), '自检脚本没有硬编码任何 Key');
+report(/not_configured|http_401|not_json/.test(checkLlmSrc), '自检能区分"没配好/Key 错/模型不守格式"三类问题');
+report(/check-llm\.js/.test(fs.readFileSync(path.join(dir, 'README.md'), 'utf8')),
+  'README 里提到这个自检脚本');
+
+console.log('\n== 2e. 简洁回复与场景库进化 ==');
+report(/pathname === '\/api\/scenes'/.test(server), '提供 /api/scenes（内置 + 学习到的场景）');
+report(/validateLearnedScene/.test(server) && /learned-/.test(server), '服务端会校验模型提出的新场景再入库');
+report(/SCENE_LEARNING/.test(server) && /SCENE_LIMIT/.test(server), '场景学习可关闭、有数量上限');
+report(/newScene/.test(server), '提示词要求模型在场景装不下时给出 newScene');
+report(/已有场景/.test(server), '提示词把已有场景清单给模型（避免重复造场景）');
+report(/shapeBlocks/.test(server) && /MAX_BLOCKS = 4/.test(server), '服务端会裁剪过长的模型输出（不会糊满屏幕）');
+report(/不超过 180 字/.test(server) && /32 个字/.test(server), '提示词限定了总字数与单句长度');
+report(/禁止这些空话/.test(server), '提示词禁用了套话（更生动）');
+report(/loadLearnedScenes/.test(app) && /extendScenes/.test(app), '前端启动时把学习场景注入本地引擎');
+report(htmlIds.has('learnedBox') && /renderLearned/.test(app), '档案页有"场景库的自我进化"展示区');
+const envExample = fs.readFileSync(path.join(dir, '.env.example'), 'utf8');
+report(/SCENE_LEARNING/.test(envExample), '.env.example 记录了场景学习开关');
+
 console.log('\n== 2b. 社交画像测试 ==');
 const assess = require('./assessment.js');
 const assessSrc = fs.readFileSync(path.join(dir, 'assessment.js'), 'utf8');

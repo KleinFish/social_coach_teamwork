@@ -92,6 +92,13 @@ class SqliteStore {
         n        INTEGER NOT NULL,
         exp_at   INTEGER NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS scenes (
+        id         TEXT PRIMARY KEY,
+        doc        TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        uses       INTEGER NOT NULL DEFAULT 1
+      );
     `);
     this.q = {
       findUserByName: this.db.prepare('SELECT id, username, pass, created_at FROM users WHERE username_lower = ?'),
@@ -116,7 +123,14 @@ class SqliteStore {
       getCounter: this.db.prepare('SELECT n, exp_at FROM counters WHERE key = ?'),
       putCounter: this.db.prepare('INSERT INTO counters (key, n, exp_at) VALUES (?, ?, ?) ' +
         'ON CONFLICT(key) DO UPDATE SET n = excluded.n, exp_at = excluded.exp_at'),
-      sweepCounters: this.db.prepare('DELETE FROM counters WHERE exp_at < ?')
+      sweepCounters: this.db.prepare('DELETE FROM counters WHERE exp_at < ?'),
+      getScene: this.db.prepare('SELECT doc, created_at, updated_at, uses FROM scenes WHERE id = ?'),
+      putScene: this.db.prepare(`INSERT INTO scenes (id, doc, created_at, updated_at, uses) VALUES (?, ?, ?, ?, 1)
+                                 ON CONFLICT(id) DO UPDATE SET doc = excluded.doc, updated_at = excluded.updated_at`),
+      bumpScene: this.db.prepare('UPDATE scenes SET uses = uses + 1, updated_at = ? WHERE id = ?'),
+      listScenes: this.db.prepare('SELECT doc, created_at, updated_at, uses FROM scenes ORDER BY uses DESC, created_at ASC'),
+      deleteScene: this.db.prepare('DELETE FROM scenes WHERE id = ?'),
+      countScenes: this.db.prepare('SELECT COUNT(*) AS n FROM scenes')
     };
   }
   // 两种后端统一返回 {id, username, pass, createdAt}，避免上层依赖各自的字段风格
@@ -146,6 +160,25 @@ class SqliteStore {
   async deleteProfile(userId) { this.q.deleteProfile.run(userId); }
   async countUsers() { return this.q.countUsers.get().n; }
   async countProfiles() { return this.q.countProfiles.get().n; }
+  /* ---- 学习到的场景（对话中自动生长的场景库） ---- */
+  async getScene(id) {
+    const row = this.q.getScene.get(id);
+    if (!row) return null;
+    return { doc: JSON.parse(row.doc), createdAt: row.created_at, updatedAt: row.updated_at, uses: row.uses };
+  }
+  async upsertScene(id, doc, now) {
+    this.q.putScene.run(id, JSON.stringify(doc), now, now);
+    return this.getScene(id);
+  }
+  async bumpScene(id, now) {
+    this.q.bumpScene.run(now, id);
+    return this.getScene(id);
+  }
+  async listScenes() {
+    return this.q.listScenes.all().map((r) => ({ doc: JSON.parse(r.doc), createdAt: r.created_at, updatedAt: r.updated_at, uses: r.uses }));
+  }
+  async deleteScene(id) { this.q.deleteScene.run(id); }
+  async countScenes() { return this.q.countScenes.get().n; }
   /** 窗口计数器：ttlSec 秒后归零。用于"每日额度"这类花真金白银的限流 */
   async bumpCounter(key, ttlSec) {
     const now = Date.now();
@@ -294,6 +327,43 @@ class RedisStore {
   }
   async countUsers() { return parseInt((await this.cmd(RedisStore.get('stat:users'))) || '0', 10); }
   async countProfiles() { return parseInt((await this.cmd(RedisStore.get('stat:profiles'))) || '0', 10); }
+  /* ---- 学习到的场景：scene:<id> 存 {d, c, u, n}，scenes:index 存 id 集合 ---- */
+  async getScene(id) {
+    const raw = await this.cmd(RedisStore.get('scene:' + id));
+    if (!raw) return null;
+    const s = JSON.parse(raw);
+    return { doc: s.d, createdAt: s.c, updatedAt: s.u, uses: s.n || 1 };
+  }
+  async upsertScene(id, doc, now) {
+    const cur = await this.getScene(id);
+    const uses = cur ? (cur.uses || 1) : 1;
+    await this.pipeline([
+      RedisStore.set('scene:' + id, JSON.stringify({ d: doc, c: (cur && cur.createdAt) || now, u: now, n: uses })),
+      ['SADD', 'scenes:index', id]
+    ]);
+    return this.getScene(id);
+  }
+  async bumpScene(id, now) {
+    const cur = await this.getScene(id);
+    if (!cur) return null;
+    const uses = (cur.uses || 1) + 1;
+    await this.cmd(RedisStore.set('scene:' + id, JSON.stringify({ d: cur.doc, c: cur.createdAt, u: now, n: uses })));
+    return { doc: cur.doc, createdAt: cur.createdAt, updatedAt: now, uses: uses };
+  }
+  async listScenes() {
+    const ids = (await this.cmd(['SMEMBERS', 'scenes:index'])) || [];
+    const out = [];
+    for (const id of ids) {
+      const s = await this.getScene(id);
+      if (s) out.push(s);
+    }
+    out.sort((a, b) => (b.uses || 1) - (a.uses || 1) || String(a.createdAt).localeCompare(String(b.createdAt)));
+    return out;
+  }
+  async deleteScene(id) {
+    await this.pipeline([['DEL', 'scene:' + id], ['SREM', 'scenes:index', id]]);
+  }
+  async countScenes() { return ((await this.cmd(['SMEMBERS', 'scenes:index'])) || []).length; }
   /** 窗口计数器：与 SqliteStore 行为一致（首次自增时设置过期时间） */
   async bumpCounter(key, ttlSec) {
     const n = parseInt((await this.cmd(['INCR', key])) || '0', 10);
@@ -363,6 +433,89 @@ const MIME = {
    注意：index.html 里 <script src> 引用的每个文件都必须在这里，否则线上会 404（见 test-server.js 的回归用例）。 */
 const PUBLIC_FILES = new Set(['/index.html', '/styles.css', '/app.js', '/coach-engine.js', '/assessment.js', '/voice.js']);
 
+/* ================================================================== *
+ * 大模型的系统提示词与块类型（模块级，供服务端与本地自检脚本共用）
+ *
+ * 设计目标（来自用户反馈）：
+ *   1. **简洁**：用户不想读长文，所以硬性限制长度、只允许 3–4 个块；
+ *   2. **生动**：要求写具体画面/台词，禁止"深呼吸、放轻松、相信自己"这类套话；
+ *   3. **会生长**：没有任何已有场景能装下这个情境时，允许它提出一个新场景，
+ *      服务端校验后入库，下次对话就能直接用（场景库自我进化）。
+ * ================================================================== */
+const LLM_SYSTEM_PROMPT = [
+  '你是「实时对话式社交教练」，面向大学新生。用户多半正站在门口、手上就一部手机。',
+  '',
+  '【硬性要求】',
+  '1. 只输出 JSON，不要任何解释、不要代码块标记。',
+  '2. 一共 3 个块（最多 4 个），总字数不超过 180 字。',
+  '3. 每个 text/item 都不超过 32 个字，一句话说完。',
+  '4. 说人话：手机屏幕上的字要能直接念出来。',
+  '',
+  '【要生动】',
+  '- 写具体的画面和台词：谁、在什么位置、说什么。',
+  '- 允许用比喻和小场景，例如"先当自己是来蹭饭的，任务只是把菜夹到自己碗里"。',
+  '- 禁止这些空话：深呼吸、放轻松、相信自己、做最好的自己、希望对你有帮助、首先其次最后。',
+  '- 不要用"你应该""你必须"这种口气，换成"要不要试试""很多人在这类场景里也会…"。',
+  '- 不要复述用户的话，不要讲大道理，不要解释"我为什么这么建议"。',
+  '',
+  '【输出格式】',
+  '{"blocks":[',
+  '{"type":"empathy","text":"一句接住他的话，≤32字，可以点出他说的具体细节"},',
+  '{"type":"analysis","title":"我听到的场景","scene":"场景名≤10字","level":3,"factors":[{"text":"≤12字"},{"text":"≤12字"}]},',
+  '{"type":"script","title":"可以直接念的话","groups":[',
+  '{"label":"开场","items":["≤32字，开口第一句"]},',
+  '{"label":"接话","items":["≤32字"]},',
+  '{"label":"离场兜底","items":["≤32字"]}]},',
+  '{"type":"checklist","title":"小提醒","items":["≤24字，一个具体动作"]}',
+  '],',
+  '"newScene":{"name":"阶段+情境，≤10字","level":1-5,"aliases":["用户可能说的3-6个词，每个≤6字"],',
+  '"stressor":"这类场景的压力来源，≤24字","reframe":["两句换个说法看紧张的话，各≤32字"],',
+  '"scripts":{"open":["≤32字"],"sustain":["≤32字"],"exit":["≤32字"]},"checklist":["≤24字"]}}',
+  '',
+  '【关于 newScene（场景库进化）】',
+  '- 只有当用户描述的情境**无法归入**下面「已有场景」中任何一类时，才返回 newScene。',
+  '- 如果已有场景能覆盖，newScene 必须是 null。',
+  '- newScene 要能复用：aliases 写用户日常会说的词，不要写成长句。',
+  '',
+  '【已有场景】',
+  '${SCENE_LIST}'
+].join('\n');
+const LLM_BLOCK_TYPES = { empathy: 1, analysis: 1, reframe: 1, script: 1, checklist: 1, breath: 1 };
+
+/* 服务端对模型输出的"兜底裁剪"：即使模型不听话，也不会把屏幕塞满 */
+const BLOCK_TEXT_MAX = 120;      // 单块正文上限
+const ITEM_TEXT_MAX = 64;        // 单条话术上限
+const MAX_BLOCKS = 4;            // 最多渲染几块
+function clampText(v, max) {
+  const s = String(v == null ? '' : v).replace(/\s+/g, ' ').trim();
+  return s.length > max ? s.slice(0, max) + '…' : s;
+}
+function shapeBlocks(raw) {
+  const out = [];
+  (Array.isArray(raw) ? raw : []).forEach((b) => {
+    if (!b || !LLM_BLOCK_TYPES[b.type]) return;
+    if (out.length >= MAX_BLOCKS) return;
+    const nb = { type: b.type };
+    if (b.text) nb.text = clampText(b.text, BLOCK_TEXT_MAX);
+    if (b.title) nb.title = clampText(b.title, 20);
+    if (b.scene) nb.scene = clampText(b.scene, 24);
+    if (b.level) nb.level = Math.max(1, Math.min(5, parseInt(b.level, 10) || 3));
+    if (Array.isArray(b.factors)) nb.factors = b.factors.slice(0, 3).map((f) => ({ text: clampText(f && f.text, 24) })).filter((f) => f.text);
+    if (Array.isArray(b.lines)) nb.lines = b.lines.slice(0, 3).map((t) => clampText(t, BLOCK_TEXT_MAX)).filter(Boolean);
+    if (Array.isArray(b.items)) nb.items = b.items.slice(0, 4).map((t) => clampText(t, ITEM_TEXT_MAX)).filter(Boolean);
+    if (b.hint) nb.hint = clampText(b.hint, 60);
+    if (Array.isArray(b.groups)) {
+      nb.groups = b.groups.slice(0, 3).map((g) => ({
+        label: clampText(g && g.label, 10) || '话术',
+        items: (Array.isArray(g && g.items) ? g.items : []).slice(0, 3).map((t) => clampText(t, ITEM_TEXT_MAX)).filter(Boolean)
+      })).filter((g) => g.items.length);
+    }
+    // 至少要有内容才渲染
+    if (nb.text || nb.items || nb.lines || nb.groups || nb.scene) out.push(nb);
+  });
+  return out;
+}
+
 function createApp(options) {
   const opts = options || {};
   const store = opts.store || createStore(opts);
@@ -387,6 +540,11 @@ function createApp(options) {
     asrDaily: envInt(process.env.ASR_DAILY_LIMIT, 3000)
   }, opts.budgets || {});
   const DAY_SEC = 24 * 60 * 60;
+  /* 场景库自我进化：大模型提出新场景 → 校验后入库；可用 SCENE_LEARNING=0 关闭 */
+  const sceneLearning = opts.sceneLearning !== undefined
+    ? !!opts.sceneLearning
+    : !(process.env.SCENE_LEARNING === '0');
+  const sceneLimit = opts.sceneLimit !== undefined ? opts.sceneLimit : envInt(process.env.SCENE_LIMIT, 50);
 
   /* 内存限流：单进程足够；多实例部署时换成 Redis 即可 */
   const buckets = new Map();
@@ -485,28 +643,30 @@ function createApp(options) {
     });
   }
 
-  const SYSTEM_PROMPT = [
-    '你是一款面向大学新生的「实时对话式社交教练」。目标不是讲道理，而是让用户 3 分钟内（最好 30 秒内）',
-    '拿到可立刻使用的状态调整与话术。语气温和共情，禁止"你应该""你必须"这类指导式表达，',
-    '改用"要不要试试""很多人在这类场景中会……"。只输出 JSON，不要代码块标记。格式：',
-    '{"blocks":[{"type":"empathy","text":"..."},',
-    '{"type":"analysis","title":"我听到的场景","scene":"场景名","level":3,"factors":[{"text":"..."}]},',
-    '{"type":"reframe","title":"30 秒：先重新解释这份紧张","lines":["...","..."]},',
-    '{"type":"script","title":"可以直接念的话","groups":[{"label":"开场","items":["..."]},{"label":"离场兜底","items":["..."]}]},',
-    '{"type":"checklist","title":"如果还有 3 分钟","items":["..."],"hint":"..."}]}'
-  ].join('\n');
-  const BLOCK_TYPES = { empathy: 1, analysis: 1, reframe: 1, script: 1, checklist: 1, breath: 1 };
+  /* 系统提示词与块类型定义在模块级（见文件上方 LLM_SYSTEM_PROMPT），
+     这样本地自检脚本 check-llm.js 能复用同一份提示词，避免两边不一致。 */
+
+  /* 场景目录：内置 13 类 + 已学习到的场景（用于提示词，也用于查重） */
+  async function sceneCatalog() {
+    let learned = [];
+    try { learned = await store.listScenes(); } catch (e) { learned = []; }
+    const names = Engine.SCENES.map((s) => s.name);
+    learned.forEach((s) => { if (s.doc && s.doc.name) names.push(s.doc.name); });
+    return { learned: learned.map((s) => s.doc).filter(Boolean), names: names };
+  }
 
   async function callLLM(text, tendency) {
+    const catalog = await sceneCatalog();
+    const system = LLM_SYSTEM_PROMPT.replace('${SCENE_LIST}', catalog.names.join('、'));
     const resp = await fetch(llm.endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + llm.key },
       body: JSON.stringify({
         model: llm.model || 'default',
-        temperature: 0.6,
+        temperature: 0.7,
         max_tokens: 800,          // 限制输出长度：单次成本可控，避免被超长回答放大开销
         messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'system', content: system },
           { role: 'user', content: '我的场景：' + text + '\n（画像：' + (tendency === 'i' ? '偏内向' : tendency === 'e' ? '偏外向' : '未设置') + '）' }
         ]
       }),
@@ -517,13 +677,62 @@ function createApp(options) {
     const content = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
     if (!content) throw Object.assign(new Error('上游返回空内容'), { status: 502 });
     const parsed = JSON.parse(String(content).replace(/```json/g, '').replace(/```/g, '').trim());
-    const blocks = (parsed && parsed.blocks) || [];
-    if (!blocks.length || !blocks.every((b) => b && BLOCK_TYPES[b.type])) {
+    const blocks = shapeBlocks(parsed && parsed.blocks);
+    if (!blocks.length) {
       throw Object.assign(new Error('上游返回结构不符合约定'), { status: 502 });
     }
-    return blocks;
+    return { blocks: blocks, newScene: (parsed && parsed.newScene) || null };
   }
 
+  /* ---------------- 学习到的场景：校验（宁可拒绝，也不要污染场景库） ---------------- */
+  function validateLearnedScene(raw, existingNames) {
+    const errors = [];
+    if (!raw || typeof raw !== 'object') return { ok: false, errors: ['不是对象'] };
+    const name = clampText(raw.name, 20);
+    if (name.length < 2 || name.length > 12) errors.push('场景名需 2–12 字');
+    if (/[<>{}\\]/.test(name)) errors.push('场景名含非法字符');
+    const flat = (s) => String(s || '').toLowerCase().replace(/\s+/g, '');
+    if ((existingNames || []).some((n) => flat(n) === flat(name))) errors.push('该场景已存在');
+    if (/^(社交|场景|沟通|交流|说话|聊天)/.test(name)) errors.push('场景名过于宽泛');
+    const level = parseInt(raw.level, 10);
+    if (!(level >= 1 && level <= 5)) errors.push('level 需为 1–5');
+    const aliases = (Array.isArray(raw.aliases) ? raw.aliases : []).map((t) => clampText(t, 10)).filter((t) => t.length >= 2);
+    if (!aliases.length || aliases.length > 8) errors.push('aliases 需 1–8 个、每个 ≥2 字');
+    const builtinAliases = [];
+    Engine.SCENES.forEach((s) => s.aliases.forEach((a) => builtinAliases.push(a)));
+    const conflict = aliases.filter((a) => builtinAliases.indexOf(a) >= 0);
+    if (conflict.length) errors.push('aliases 与已有场景关键词冲突：' + conflict.join('、'));
+    // 名字撞上内置场景的关键词同样会抢走识别（例如学了名字叫"面试"的场景）
+    if (builtinAliases.indexOf(name) >= 0) errors.push('场景名与已有场景关键词冲突：' + name);
+    const stressor = clampText(raw.stressor, 40);
+    if (!stressor) errors.push('缺少 stressor');
+    const pick = (v, max) => (Array.isArray(v) ? v : []).map((t) => clampText(t, 60)).filter(Boolean).slice(0, max);
+    const reframe = pick(raw.reframe, 3);
+    if (!reframe.length) errors.push('reframe 至少 1 条');
+    const scripts = raw.scripts && typeof raw.scripts === 'object' ? raw.scripts : {};
+    const open = pick(scripts.open, 3);
+    const sustain = pick(scripts.sustain, 3);
+    const shift = pick(scripts.shift, 3);
+    const exit = pick(scripts.exit, 2);
+    if (!open.length) errors.push('scripts.open 至少 1 条');
+    if (!exit.length) errors.push('scripts.exit 至少 1 条');
+    const checklist = pick(raw.checklist, 4);
+    if (!checklist.length) errors.push('checklist 至少 1 条');
+    const allText = [name, stressor].concat(reframe, open, sustain, shift, exit, checklist).join(' ');
+    if (Engine.safetyCheck(allText)) errors.push('内容包含不当表述');
+    if (errors.length) return { ok: false, errors: errors };
+    const normName = flat(name);
+    const id = 'learned-' + crypto.createHash('sha256').update(normName).digest('hex').slice(0, 10);
+    return {
+      ok: true,
+      id: id,
+      doc: {
+        id: id, name: name, level: level, aliases: aliases, stressor: stressor, reframe: reframe,
+        scripts: { open: open, sustain: sustain, shift: shift, exit: exit },
+        checklist: checklist, learned: true, source: 'llm'
+      }
+    };
+  }
   async function handleApi(req, res, pathname) {
     const method = req.method.toUpperCase();
     const user = await currentUser(req);
@@ -544,6 +753,8 @@ function createApp(options) {
         llmDailyLimit: budgets.llmDaily,
         asrUsed: await usedToday('asr'),
         asrDailyLimit: budgets.asrDaily,
+        scenes: await (async () => { try { return await store.countScenes(); } catch (e) { return 0; } })(),
+        sceneLearning: sceneLearning,
         time: new Date().toISOString()
       });
       return;
@@ -655,11 +866,50 @@ function createApp(options) {
       if (Engine.safetyCheck(text)) { json(res, 200, { blocks: [Engine.CRISIS_BLOCK], source: 'safety' }); return; }
       try {
         const p = await publicProfile(user.userId);
-        const blocks = await callLLM(text, p.profile && p.profile.tendency);
-        json(res, 200, { blocks: blocks, source: 'llm' });
+        const out = await callLLM(text, p.profile && p.profile.tendency);
+        /* 场景库进化：模型认为现有场景装不下这个情境时，会带回 newScene */
+        /* 场景库进化：模型认为现有场景装不下这个情境时，会带回 newScene。
+           注意只跟「内置场景」查重：已学过的同名场景要走进"累加使用次数"分支，
+           而不是被当成重复而丢掉。 */
+        let learned = null;
+        if (sceneLearning && out.newScene) {
+          const v = validateLearnedScene(out.newScene, Engine.SCENES.map((s) => s.name));
+          if (v.ok) {
+            const now = new Date().toISOString();
+            const existed = await store.getScene(v.id);
+            if (existed) {
+              const bumped = await store.bumpScene(v.id, now);
+              learned = { id: v.id, name: existed.doc.name, isNew: false, uses: (bumped && bumped.uses) || existed.uses };
+            } else if ((await store.countScenes()) < sceneLimit) {
+              await store.upsertScene(v.id, v.doc, now);
+              learned = { id: v.id, name: v.doc.name, isNew: true, uses: 1 };
+            }
+          } else {
+            console.warn('[scenes] 拒收模型提出的新场景：' + v.errors.join('；'));
+          }
+        }
+        json(res, 200, { blocks: out.blocks, source: 'llm', learned: learned });
       } catch (e) {
         json(res, 502, { error: '大模型调用失败：' + e.message, code: 'llm_failed' });
       }
+      return;
+    }
+
+    /* 场景库：内置 + 从对话中学到的（前端启动时注入，用于识别新场景） */
+    if (pathname === '/api/scenes' && method === 'GET') {
+      let learned = [];
+      try { learned = await store.listScenes(); } catch (e) { learned = []; }
+      json(res, 200, {
+        builtin: Engine.SCENES.length,
+        learnedCount: learned.length,
+        limit: sceneLimit,
+        learning: sceneLearning,
+        scenes: learned.map((s) => ({
+          id: s.doc.id, name: s.doc.name, level: s.doc.level, aliases: s.doc.aliases,
+          stressor: s.doc.stressor, reframe: s.doc.reframe, scripts: s.doc.scripts,
+          checklist: s.doc.checklist, uses: s.uses, at: s.createdAt
+        }))
+      });
       return;
     }
 
@@ -787,4 +1037,7 @@ function start() {
 
 if (require.main === module) start();
 
-module.exports = { createApp, start, createStore, SqliteStore, RedisStore, hashPassword, verifyPassword };
+module.exports = {
+  createApp, start, createStore, SqliteStore, RedisStore, hashPassword, verifyPassword,
+  LLM_SYSTEM_PROMPT, LLM_BLOCK_TYPES
+};
