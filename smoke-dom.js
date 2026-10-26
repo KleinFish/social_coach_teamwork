@@ -46,6 +46,26 @@ ok('首屏有欢迎消息', $('chat').childNodes.length >= 2, String($('chat').c
 ok('场景快选渲染了 6 条', $('suggest').childNodes.length === 6);
 ok('应急按钮与引擎一致', $('sosGrid').childNodes.length === Engine.EMERGENCY.length, String($('sosGrid').childNodes.length));
 
+section('登录入口在页头（原来藏在档案页里）');
+ok('页头有登录按钮', !!$('authBtn'));
+ok('未登录时按钮写着"未登录 · 点此登录"', /未登录/.test($('authBtnText').textContent), $('authBtnText').textContent);
+ok('未登录状态用琥珀色状态点标出来',
+  $('authBtn').classList.contains('state-loggedout') && !!$('authDot'),
+  $('authBtn').className);
+ok('登录面板默认是关着的', $('authModal').classList.contains('hidden'));
+$('authBtn').click();
+ok('点页头按钮能打开登录面板', !$('authModal').classList.contains('hidden'));
+ok('面板里有昵称/密码/登录/注册',
+  !!$('cloudUser') && !!$('cloudPass') && !!$('cloudLogin') && !!$('cloudRegister'));
+ok('面板里有说明（登录能同步 + 手机语音/大模型需要登录）',
+  /登录后：复盘会同步/.test(html) && /语音转写/.test(html) && /大模型对话也需要登录/.test(html));
+$('authClose').click();
+ok('可以关掉面板', $('authModal').classList.contains('hidden'));
+$('authBtn').click();
+$('authBack').click();
+ok('点遮罩也能关掉', $('authModal').classList.contains('hidden'));
+ok('档案页也保留了进入入口', !!$('cloudOpenAuth'));
+
 section('社交前准备（只给话术）');
 const before = $('chat').childNodes.length;
 $('suggest').childNodes[0].click();

@@ -127,6 +127,13 @@ function takeQuiz(device, weakDims) {
   A.$('cloudPass').value = 'password123';
   A.$('cloudRegister').click();
   ok('界面切换为已登录', await until(() => /已登录/.test(A.$('cloudPill').textContent)), A.$('cloudPill').textContent);
+  ok('页头按钮变成昵称（登录状态一眼可见）',
+    await until(() => /集成测试同学/.test(A.$('authBtnText').textContent)), A.$('authBtnText').textContent);
+  ok('页头状态点切换为"已同步"（绿色）',
+    await until(() => A.$('authBtn').classList.contains('state-synced')),
+    A.$('authBtn').className + ' | ' + A.$('authBtnText').textContent);
+  ok('页头文案同时写明同步状态', /已同步|未同步/.test(A.$('authBtnText').textContent), A.$('authBtnText').textContent);
+  ok('登录成功后登录面板自动收起', A.$('authModal').classList.contains('hidden'));
   ok('登录后显示账号名', /集成测试同学/.test(A.$('cloudWho').textContent), A.$('cloudWho').textContent);
   ok('注册后本机数据仍在', (A.profile() || {}).reviews.length === 1);
   // 直接通过存储接口核对服务端真实落库内容（对 sqlite 与外部 Redis 两种后端都成立）

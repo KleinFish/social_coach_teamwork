@@ -130,6 +130,25 @@ report(/sendReview/.test(app) && /mode: 'review'/.test(app), '前端用 review �
 report(/case 'say'/.test(app), '渲染器支持 say 段落（聊天风格）');
 report(/E\.buildReviewReply/.test(app), '没接大模型时也能像朋友一样回（本地兜底）');
 
+console.log('\n== 2g. 登录入口在页头 ==');
+const headerHtml = (html.match(/<header[\s\S]*?<\/header>/) || [''])[0];
+report(/id="authBtn"/.test(headerHtml), '登录按钮在最上面的页头里');
+report(/id="authModal"/.test(html) && /id="authClose"/.test(html) && /id="authBack"/.test(html),
+  '有登录面板（可关闭、点遮罩可关）');
+const formIdx = html.indexOf('id="cloudForm"');
+const modalIdx = html.indexOf('id="authModal"');
+const meIdx = html.indexOf('id="panel-me"');
+report(formIdx > modalIdx && formIdx < meIdx, '登录表单在面板里，不再埋在「档案」页深处');
+report(/id="cloudOpenAuth"/.test(html), '「档案」页也保留一个进入入口（双入口）');
+report(/authBtnText/.test(app) && /cloud\.user\.username/.test(app), '页头按钮会显示当前登录的昵称');
+report(/function openAuth|function closeAuth/.test(app), '打开/关闭登录面板的逻辑存在');
+report(/closeAuth\(\);/.test(app), '登录成功后会自动收起面板');
+report(/id="authDot"/.test(html) && /\.auth-dot/.test(cssSrc), '页头有状态点（颜色区分登录/同步状态）');
+report(['state-loggedout', 'state-syncing', 'state-synced', 'state-unsynced'].every((c) => new RegExp('\\.auth-chip\\.' + c).test(cssSrc)),
+  '未登录 / 同步中 / 已同步 / 未同步 四种状态都有样式');
+report(['state-loggedout', 'state-syncing', 'state-synced', 'state-unsynced'].every((c) => app.indexOf("'" + c + "'") >= 0),
+  '四种状态都会在运行时切换（不只写死一个）');
+
 console.log('\n== 2b. 社交画像测试 ==');
 const assess = require('./assessment.js');
 const assessSrc = fs.readFileSync(path.join(dir, 'assessment.js'), 'utf8');

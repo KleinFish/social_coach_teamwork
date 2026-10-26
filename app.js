@@ -496,11 +496,60 @@
     }
     form.classList.toggle('hidden', !showForm);
     signed.classList.toggle('hidden', !showSigned);
+    /* 页头状态按钮：点 + 文案都要能一眼看出"登录没登录、同步了没"
+       state-loggedout（琥珀）/ state-syncing（蓝，脉冲）/ state-synced（绿）/ state-unsynced（琥珀） */
+    var authBtn = $('#authBtn');
+    var authText = $('#authBtnText');
+    if (authBtn && authText) {
+      var state, label, tip;
+      if (!cloud.available) {
+        state = 'state-offline'; label = '本地模式';
+        tip = '当前是直接打开本地文件，部署到服务器后即可登录同步';
+      } else if (cloud.user && cloud.busy) {
+        state = 'state-syncing'; label = '同步中… · ' + cloud.user.username;
+        tip = '正在把本机数据同步到你的账号';
+      } else if (cloud.user && cloud.lastSync) {
+        state = 'state-synced'; label = '已同步 · ' + cloud.user.username;
+        tip = '已登录并同步：上次 ' + cloud.lastSync.toLocaleString('zh-CN') + '（点一下看账号与同步）';
+      } else if (cloud.user) {
+        state = 'state-unsynced'; label = '未同步 · ' + cloud.user.username;
+        tip = '已登录，但还没有同步过（点一下去「档案」点"立即同步"）';
+      } else {
+        state = 'state-loggedout'; label = '未登录 · 点此登录';
+        tip = '未登录：数据只在本机；登录后可同步复盘，手机上才能用语音转写和大模型';
+      }
+      authText.textContent = label;
+      authBtn.className = 'auth-chip ' + state;
+      authBtn.title = tip;
+      authBtn.disabled = !cloud.available;
+    }
     var llmPill = $('#llmPill');
     if (llmPill) {
       llmPill.textContent = cloud.llm ? '服务器已配置' : (cloud.available ? '未配置（用本地引擎）' : '离线不可用');
       llmPill.className = 'mode-pill' + (cloud.llm ? ' live' : '');
     }
+  }
+
+  /* ---------------- 登录面板（页头入口） ---------------- */
+  function openAuth() {
+    var modal = $('#authModal');
+    if (!modal) return;
+    if (cloud.user) { switchTab('me'); return; }   // 已登录：直接看账号与同步
+    if (!cloud.available) { toast('当前是本地文件模式，部署到服务器后即可注册登录'); return; }
+    modal.classList.remove('hidden');
+    setTimeout(function () { var u = $('#cloudUser'); if (u && u.focus) u.focus(); }, 30);
+  }
+  function closeAuth() {
+    var modal = $('#authModal');
+    if (modal) modal.classList.add('hidden');
+  }
+  $('#authBtn').addEventListener('click', openAuth);
+  $('#authClose').addEventListener('click', closeAuth);
+  $('#authBack').addEventListener('click', closeAuth);
+  var openAuthInMe = $('#cloudOpenAuth');
+  if (openAuthInMe) openAuthInMe.addEventListener('click', openAuth);
+  if (document && typeof document.addEventListener === 'function') {
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeAuth(); });
   }
 
   /* ---------------- 社交前准备 ---------------- */
@@ -1478,6 +1527,7 @@
         store(PROFILE_KEY, profile);
         $('#cloudPass').value = '';
         renderMe();
+        closeAuth();                     // 登录/注册成功后自动收起面板
         toast(okMsg);
         syncNow(false);
       })

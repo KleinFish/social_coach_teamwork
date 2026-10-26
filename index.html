@@ -12,14 +12,45 @@
 
   <header class="topbar">
     <div class="brand-mark">◎</div>
-    <div>
+    <div class="brand-text">
       <h1>社交教练</h1>
       <div class="sub">实时对话式社交辅助 · v1.0</div>
     </div>
     <button class="privacy-chip" id="privacyChip" title="点击查看数据去向">
       <span class="dot"></span>数据默认只存本机
     </button>
+    <button class="auth-chip state-loggedout" id="authBtn" type="button" title="登录后可以同步复盘、在手机上用语音和大模型">
+      <span class="auth-dot" id="authDot"></span>
+      <span id="authBtnText">未登录 · 点此登录</span>
+    </button>
   </header>
+
+  <!-- 登录面板：从页头按钮打开（原来藏在「档案」页里，用户找不到） -->
+  <div class="modal hidden" id="authModal" role="dialog" aria-modal="true" aria-labelledby="authTitle">
+    <div class="modal-back" id="authBack"></div>
+    <div class="modal-card">
+      <div class="row-between">
+        <h2 id="authTitle">登录 / 注册</h2>
+        <button class="btn ghost small" id="authClose" type="button">关闭</button>
+      </div>
+      <p class="hint" id="authHint">登录后：复盘会同步到你自己的账号，换设备也能接着用；手机上的语音转写、以及大模型对话也需要登录。</p>
+      <form id="cloudForm" class="mt-10">
+        <div class="field">
+          <label for="cloudUser">昵称</label>
+          <input type="text" id="cloudUser" autocomplete="username" placeholder="2–24 个汉字/字母/数字">
+        </div>
+        <div class="field">
+          <label for="cloudPass">密码</label>
+          <input type="password" id="cloudPass" autocomplete="current-password" placeholder="至少 8 位">
+        </div>
+        <div class="row-between">
+          <button class="btn small" type="submit" id="cloudLogin">登录</button>
+          <button class="btn ghost small" type="button" id="cloudRegister">注册新账号</button>
+        </div>
+      </form>
+      <p class="hint" id="authNote">不需要手机号或邮箱，只用一个昵称和密码。</p>
+    </div>
+  </div>
 
   <main class="main">
 
@@ -182,20 +213,10 @@
         </div>
         <p class="hint" id="cloudHint">未登录时所有数据只在这台设备上。注册账号后可以把复盘同步到云端，换设备也能接着用。</p>
 
-        <form id="cloudForm" class="mt-10">
-          <div class="field">
-            <label for="cloudUser">昵称</label>
-            <input type="text" id="cloudUser" autocomplete="username" placeholder="2–24 个汉字/字母/数字">
-          </div>
-          <div class="field">
-            <label for="cloudPass">密码</label>
-            <input type="password" id="cloudPass" autocomplete="current-password" placeholder="至少 8 位">
-          </div>
-          <div class="row-between">
-            <button class="btn small" type="submit" id="cloudLogin">登录</button>
-            <button class="btn ghost small" type="button" id="cloudRegister">注册新账号</button>
-          </div>
-        </form>
+        <div class="row-between mt-10">
+          <button class="btn small" id="cloudOpenAuth" type="button">登录 / 注册</button>
+          <span class="hint">在页面顶部也能随时进入</span>
+        </div>
 
         <div id="cloudSignedIn" class="hidden">
           <p class="line" id="cloudWho"></p>

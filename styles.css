@@ -67,6 +67,7 @@ button { cursor: pointer; border: none; background: none; }
 }
 .topbar h1 { margin: 0; font-size: 17px; font-weight: 650; letter-spacing: .2px; }
 .topbar .sub { font-size: 12px; color: var(--ink-3); margin-top: -3px; }
+.brand-text { min-width: 0; }
 .brand-mark {
   width: 34px; height: 34px; border-radius: 11px; flex: none;
   background: linear-gradient(135deg, var(--primary), var(--teal));
@@ -78,6 +79,44 @@ button { cursor: pointer; border: none; background: none; }
   border-radius: 999px; padding: 5px 11px; white-space: nowrap;
 }
 .privacy-chip .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--teal); }
+/* 页头登录状态：点 + 文案都要一眼可见（原来登录藏在「档案」页里，用户找不到） */
+.auth-chip {
+  flex: none; display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12.5px; font-weight: 600;
+  border-radius: 999px; padding: 6px 12px; white-space: nowrap;
+  border: 1px solid var(--line); background: #fff; color: var(--ink-2);
+  transition: .15s; max-width: 46vw; overflow: hidden; text-overflow: ellipsis;
+}
+.auth-chip:hover { filter: brightness(1.03); }
+.auth-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--muted); }
+/* 未登录：琥珀色，明确"你还没登录" */
+.auth-chip.state-loggedout { background: var(--warn-soft); border-color: var(--warn); color: #8a5a00; }
+.auth-chip.state-loggedout .auth-dot { background: var(--warn); box-shadow: 0 0 0 3px rgba(240, 160, 40, .18); }
+/* 已登录但没同步过：琥珀 */
+.auth-chip.state-unsynced { background: var(--warn-soft); border-color: var(--warn); color: #8a5a00; }
+.auth-chip.state-unsynced .auth-dot { background: var(--warn); }
+/* 同步中：蓝色脉冲 */
+.auth-chip.state-syncing { background: var(--primary-soft); border-color: var(--primary); color: var(--primary); }
+.auth-chip.state-syncing .auth-dot { background: var(--primary); animation: blink 1.1s infinite; }
+/* 已同步：绿色，最安心的状态 */
+.auth-chip.state-synced { background: var(--teal-soft); border-color: var(--teal); color: #0d6b60; }
+.auth-chip.state-synced .auth-dot { background: var(--teal); box-shadow: 0 0 0 3px rgba(34, 168, 154, .18); }
+/* 本地文件模式：灰 */
+.auth-chip.state-offline { background: var(--line); border-color: var(--line); color: var(--muted); }
+
+/* ---------- 登录面板 ---------- */
+.modal { position: fixed; inset: 0; z-index: 90; display: flex; align-items: center; justify-content: center; padding: 16px; }
+.modal-back { position: absolute; inset: 0; background: rgba(22, 28, 42, .42); backdrop-filter: blur(2px); }
+.modal-card {
+  position: relative; width: min(94vw, 420px); background: #fff; border-radius: 16px;
+  padding: 18px 18px 16px; box-shadow: 0 18px 50px rgba(24, 32, 56, .28);
+  animation: fade .18s ease;
+}
+.modal-card h2 { margin: 0 0 2px; font-size: 19px; }
+.modal-card .hint { margin-top: 6px; }
+@media (max-width: 460px) {
+  .privacy-chip { display: none; }   /* 手机窄屏优先保证登录按钮可见 */
+}
 
 /* ---------- 主体 ---------- */
 .main { flex: 1; padding: 14px 14px 92px; }
