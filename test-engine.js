@@ -36,16 +36,37 @@ const em = E.detectEmotions('心跳加速，手心出汗，大脑一片空白，
 ok('识别出生理+认知+反刍', em.labels.length >= 3, JSON.stringify(em.labels.map(l => l.key)));
 ok('强度随信号增多而上升', em.intensity >= 3, String(em.intensity));
 
-/* 4. 准备回复：结构完整 + 30 秒调节 + 话术 + 3 分钟清单 */
-section('社交前准备模块');
+/* 4. 准备回复：**只给话术**（产品改版：删掉场景判断/解释/呼吸/清单） */
+section('社交前准备模块（只给话术）');
 const prep = E.buildPrepReply('待会儿要参加一个8人聚餐，其中两个不太熟，我有点紧张', E.createProfile());
 const types = prep.blocks.map(b => b.type);
-ok('包含共情/分析/认知重构/呼吸/话术/清单',
-  ['empathy', 'analysis', 'reframe', 'breath', 'script', 'checklist'].every(t => types.includes(t)), types.join(','));
-ok('准备时长控制在 3 分钟以内(呼吸 30s + 清单提示)',
-  prep.blocks.find(b => b.type === 'breath').seconds === 30 &&
-  /3 分钟/.test(prep.blocks.find(b => b.type === 'checklist').hint));
-ok('话术块含开场/接话/离场兜底', prep.blocks.find(b => b.type === 'script').groups.length >= 4);
+ok('准备回复 = 一行场景提示 + 只有话术',
+  types.length === 2 && types[0] === 'sceneHint' && types[1] === 'script', types.join(','));
+ok('场景提示带场景名与压力等级',
+  prep.blocks[0].scene === '与不太熟的人吃饭' && prep.blocks[0].level >= 1,
+  JSON.stringify(prep.blocks[0]));
+ok('不再出现场景判断/解释/呼吸/清单',
+  !types.some(t => ['analysis', 'reframe', 'breath', 'checklist'].includes(t)), types.join(','));
+const multi = E.buildPrepReply('要去社团面试，会群面', null);
+ok('多个场景命中时，提示里给出可切换的备选',
+  multi.blocks[0].alternatives.length >= 1, JSON.stringify(multi.blocks[0].alternatives));
+ok('话术块含开场/接话/离场兜底', prep.blocks.find(b => b.type === 'script').groups.length >= 3);
+ok('场景与压力仍在内部算出来（供复盘/档案用）',
+  prep.scene && prep.scene.id && prep.pressure && prep.pressure.level >= 1,
+  JSON.stringify({ scene: prep.scene && prep.scene.id, level: prep.pressure && prep.pressure.level }));
+
+/* 4b. 复盘回复：朋友式聊天 + 场景判断 + 换个角度解释 */
+section('社交后复盘模块（朋友式聊天）');
+const rev = E.buildReviewReply('今天聚餐我基本没说话，回来一直在想要不要解释一下', E.createProfile());
+const revTypes = rev.blocks.map(b => b.type);
+ok('复盘回复以"说话"段落开头（像朋友聊天）', revTypes[0] === 'say' && rev.blocks[0].text.length > 5, revTypes.join(','));
+ok('复盘里包含场景判断', revTypes.includes('analysis') && !!rev.blocks.find(b => b.type === 'analysis').scene);
+ok('复盘里包含换个角度的解释', revTypes.includes('reframe') && rev.blocks.find(b => b.type === 'reframe').lines.length > 0);
+ok('复盘不再出现呼吸块', !revTypes.includes('breath'));
+const guessed = E.guessReview('今天聚餐人多都是陌生人，我基本没说话，感觉还行');
+ok('能从自由倾诉里粗抽结构化复盘（离线兜底）',
+  guessed.level >= 1 && guessed.level <= 5 && guessed.triggers.length >= 1, JSON.stringify(guessed));
+ok('粗抽的效果判断能识别"还行"', guessed.effect === 'good', guessed.effect);
 
 /* 5. 应急模块：每个话题都要有一句可直接念的话 */
 section('社交中应急模块');
@@ -175,18 +196,19 @@ ok('画像一致时 sameProfile 判定为相等',
 ok('画像不同时判定为不相等', E.sameProfile(pLocal, pRemote) === false);
 
 section('准备建议随画像分档');
+/* 注：场景判断/解释已挪到复盘模块，selfCheck 现在是结果对象的顶层字段 */
 const prepNoAssess = E.buildPrepReply('明天课堂展示', null);
-ok('没有画像时不出现自评提示', !prepNoAssess.blocks[1].selfCheck);
+ok('没有画像时不出现自评提示', !prepNoAssess.selfCheck);
 const prepHard = E.buildPrepReply('明天课堂展示', null, { selfCheckDifficulty: 3.9 });
-ok('预测偏吃力时先强调稳住状态', /偏吃力/.test(prepHard.blocks[1].selfCheck) && /先花 30 秒/.test(prepHard.blocks[1].selfCheck),
-  prepHard.blocks[1].selfCheck);
+ok('预测偏吃力时先强调稳住状态', /偏吃力/.test(prepHard.selfCheck) && /先花 30 秒/.test(prepHard.selfCheck),
+  prepHard.selfCheck);
 const prepEasy = E.buildPrepReply('向店员问路', null, { selfCheckDifficulty: 1.2 });
-ok('预测顺手时直接给话术', /应付得来/.test(prepEasy.blocks[1].selfCheck), prepEasy.blocks[1].selfCheck);
+ok('预测顺手时直接给话术', /应付得来/.test(prepEasy.selfCheck), prepEasy.selfCheck);
 const prepMid = E.buildPrepReply('和不太熟的人吃饭', null, { selfCheckDifficulty: 3 });
-ok('预测中等时给出中等口径', /属于中等/.test(prepMid.blocks[1].selfCheck), prepMid.blocks[1].selfCheck);
+ok('预测中等时给出中等口径', /属于中等/.test(prepMid.selfCheck), prepMid.selfCheck);
 ok('分档口径与量表一致（>3.5 为偏吃力）',
-  /偏吃力/.test(E.buildPrepReply('开会发言', null, { selfCheckDifficulty: 3.6 }).blocks[1].selfCheck) &&
-  !/偏吃力/.test(E.buildPrepReply('开会发言', null, { selfCheckDifficulty: 3.5 }).blocks[1].selfCheck));
+  /偏吃力/.test(E.buildPrepReply('开会发言', null, { selfCheckDifficulty: 3.6 }).selfCheck) &&
+  !/偏吃力/.test(E.buildPrepReply('开会发言', null, { selfCheckDifficulty: 3.5 }).selfCheck));
 
 /* 13. 元问题识别：不再"一本正经地胡说八道" */
 section('产品/元问题识别');
@@ -206,7 +228,10 @@ ok('元问题回复给出可用的引导', /我能帮上的部分/.test(JSON.str
 ok('元问题不再编造场景预测', !/我先按最接近的场景/.test(JSON.stringify(metaReply.blocks)));
 ok('元问题回复不含"你应该"', JSON.stringify(metaReply.blocks).indexOf('你应该') === -1);
 const normalReply = E.buildPrepReply('明天上午面试，有点紧张', null);
-ok('正常场景仍走完整准备流程', !normalReply.meta && normalReply.blocks.length >= 6);
+ok('正常场景仍走准备流程（提示 + 话术）',
+  !normalReply.meta && normalReply.blocks.length === 2 &&
+  normalReply.blocks[0].type === 'sceneHint' && normalReply.blocks[1].type === 'script',
+  JSON.stringify(normalReply.blocks.map((b) => b.type)));
 
 /* 14. 场景识别：线上加好友的第一句话（曾被误判成宿舍场景，给出"你几点睡"的错误建议） */
 section('场景识别准确性');
@@ -253,13 +278,14 @@ const empAll = E.SCENES.map(function (s) { return E.empathyLine({ labels: [] }, 
 ok('13 个场景的第一句互不相同（原来所有场景都是同一句）',
   empAll.every(function (t) { return t && t.length > 8; }) && new Set(empAll).size === empAll.length,
   '唯一值 ' + new Set(empAll).size + '/' + empAll.length);
-const empA = E.buildPrepReply('明天上午面试，第一次', null).blocks[0].text;
-const empB = E.buildPrepReply('待会儿要参加一个 8 人聚餐，其中两个不太熟', null).blocks[0].text;
+const empA = E.buildReviewReply('明天上午面试，第一次', null).blocks[0].text;
+const empB = E.buildReviewReply('待会儿要参加一个 8 人聚餐，其中两个不太熟', null).blocks[0].text;
 ok('两个不同场景的第一句确实不一样', empA !== empB, empA + ' || ' + empB);
-const reframe = E.buildPrepReply('明天上午面试，第一次', null).blocks.filter(function (b) { return b.type === 'reframe'; })[0];
-ok('去掉了"报告里受访者最认可…"那行小字', !reframe.subtitle, JSON.stringify(reframe.subtitle));
+const reframe = E.buildReviewReply('明天上午面试，第一次', null).blocks.filter(function (b) { return b.type === 'reframe'; })[0];
+ok('复盘里的"解释"不带多余小字（报告里受访者最认可…已删）',
+  reframe && !reframe.subtitle, JSON.stringify(reframe && reframe.subtitle));
 ok('整段回复里不再出现该文案',
-  JSON.stringify(E.buildPrepReply('明天上午面试，第一次', null).blocks).indexOf('受访者最认可') === -1);
+  JSON.stringify(E.buildReviewReply('明天上午面试，第一次', null).blocks).indexOf('受访者最认可') === -1);
 ok('社团面试不再被误判成求职面试',
   E.detectScenes('要去社团面试，会群面')[0].scene.id === 'club-interview',
   E.detectScenes('要去社团面试，会群面').map(function (x) { return x.scene.id; }).join(','));

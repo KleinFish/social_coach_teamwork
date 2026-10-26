@@ -436,51 +436,77 @@ const PUBLIC_FILES = new Set(['/index.html', '/styles.css', '/app.js', '/coach-e
 /* ================================================================== *
  * 大模型的系统提示词与块类型（模块级，供服务端与本地自检脚本共用）
  *
- * 设计目标（来自用户反馈）：
- *   1. **简洁**：用户不想读长文，所以硬性限制长度、只允许 3–4 个块；
- *   2. **生动**：要求写具体画面/台词，禁止"深呼吸、放轻松、相信自己"这类套话；
- *   3. **会生长**：没有任何已有场景能装下这个情境时，允许它提出一个新场景，
- *      服务端校验后入库，下次对话就能直接用（场景库自我进化）。
+ * 产品设计（来自用户决策）：
+ *   1. **准备页只给话术**：不问场景、不解释、不呼吸、不列清单——用户站在门口，只想照着念。
+ *   2. **复盘页像朋友聊天**：用户自由倾诉，模型用自然语言接住，并顺手把「场景判断」
+ *      和「换个角度解释」讲清楚；同时返回结构化字段供成长档案使用（不给用户看）。
+ *   3. **简洁生动 + 会生长**：硬性限长、禁套话；场景装不下时提议 newScene，
+ *      服务端校验后入库（场景库自我进化）。
  * ================================================================== */
-const LLM_SYSTEM_PROMPT = [
-  '你是「实时对话式社交教练」，面向大学新生。用户多半正站在门口、手上就一部手机。',
+const LLM_PREP_PROMPT = [
+  '你是「实时对话式社交教练」。用户马上要走进一个场合，只想拿到能直接念出口的话。',
+  '',
+  '【只给话术】不要共情、不要分析场景、不要解释原因、不要呼吸放松、不要清单、不要小标题。',
   '',
   '【硬性要求】',
   '1. 只输出 JSON，不要任何解释、不要代码块标记。',
-  '2. 一共 3 个块（最多 4 个），总字数不超过 180 字。',
-  '3. 每个 text/item 都不超过 32 个字，一句话说完。',
-  '4. 说人话：手机屏幕上的字要能直接念出来。',
+  '2. 只返回 1 个 script 块：2–3 组（开场 / 接话 / 离场兜底），每组 1–2 条，合计不超过 6 条。',
+  '3. 每条不超过 32 个字，要能照着念出口。',
+  '4. 具体：可以带称呼、动作、停顿（例："老师，我先说两句，怕漏了"）。',
+  '5. 不要"你应该""你必须"；不要写"深呼吸""放轻松""相信自己""希望对你有帮助"。',
   '',
-  '【要生动】',
-  '- 写具体的画面和台词：谁、在什么位置、说什么。',
-  '- 允许用比喻和小场景，例如"先当自己是来蹭饭的，任务只是把菜夹到自己碗里"。',
-  '- 禁止这些空话：深呼吸、放轻松、相信自己、做最好的自己、希望对你有帮助、首先其次最后。',
-  '- 不要用"你应该""你必须"这种口气，换成"要不要试试""很多人在这类场景里也会…"。',
-  '- 不要复述用户的话，不要讲大道理，不要解释"我为什么这么建议"。',
+  '【关于追问】如果用户是在补充信息或要求修改（例如"对方是老师""再短一点""能更随意吗"），',
+  '就在上一版话术的基础上改，不要重新解释。',
   '',
   '【输出格式】',
-  '{"blocks":[',
-  '{"type":"empathy","text":"一句接住他的话，≤32字，可以点出他说的具体细节"},',
-  '{"type":"analysis","title":"我听到的场景","scene":"场景名≤10字","level":3,"factors":[{"text":"≤12字"},{"text":"≤12字"}]},',
-  '{"type":"script","title":"可以直接念的话","groups":[',
-  '{"label":"开场","items":["≤32字，开口第一句"]},',
+  '{"blocks":[{"type":"script","title":"可以直接念的话","groups":[',
+  '{"label":"开场","items":["≤32字"]},',
   '{"label":"接话","items":["≤32字"]},',
-  '{"label":"离场兜底","items":["≤32字"]}]},',
-  '{"type":"checklist","title":"小提醒","items":["≤24字，一个具体动作"]}',
-  '],',
-  '"newScene":{"name":"阶段+情境，≤10字","level":1-5,"aliases":["用户可能说的3-6个词，每个≤6字"],',
-  '"stressor":"这类场景的压力来源，≤24字","reframe":["两句换个说法看紧张的话，各≤32字"],',
-  '"scripts":{"open":["≤32字"],"sustain":["≤32字"],"exit":["≤32字"]},"checklist":["≤24字"]}}',
+  '{"label":"离场兜底","items":["≤32字"]}]}],',
+  '"newScene":null}',
   '',
   '【关于 newScene（场景库进化）】',
   '- 只有当用户描述的情境**无法归入**下面「已有场景」中任何一类时，才返回 newScene。',
-  '- 如果已有场景能覆盖，newScene 必须是 null。',
-  '- newScene 要能复用：aliases 写用户日常会说的词，不要写成长句。',
+  '- 能覆盖就返回 null。aliases 写用户日常会说的词，不要写成长句。',
+  '{"name":"阶段+情境，≤10字","level":1-5,"aliases":["3-6个词，每个≤6字"],"stressor":"≤24字",',
+  '"reframe":["≤32字"],"scripts":{"open":["≤32字"],"sustain":["≤32字"],"exit":["≤32字"]},"checklist":["≤24字"]}',
   '',
   '【已有场景】',
   '${SCENE_LIST}'
 ].join('\n');
-const LLM_BLOCK_TYPES = { empathy: 1, analysis: 1, reframe: 1, script: 1, checklist: 1, breath: 1 };
+
+const LLM_REVIEW_PROMPT = [
+  '你是用户的朋友，不是客服，也不是心理咨询师。他刚经历了一场社交，正在跟你讲。',
+  '',
+  '【像朋友一样说】',
+  '- 口语、短句。可以先给一句真实反应，比如"啊，那种气氛确实挺难受的"。',
+  '- 一次 2–3 段，总字数不超过 150 字。',
+  '- 不要列表、不要小标题、不要"1. 2. 3."、不要填表、不要总结陈词、不要说教。',
+  '',
+  '【顺带做到两件事，但要用自然语言说出来，不要写成栏目】',
+  '① 帮他说清这是哪类场景、压力到底来自哪（人多？怕说错？容错空间小？）',
+  '② 帮他把这件事换个角度解释一下：不是他这个人有问题，而是这类场景本来就难。',
+  '',
+  '【最后给一句】下次遇到同类情况可以直接用的话，一句就够。',
+  '',
+  '【禁止】"你应该""你必须"、呼吸放松、心理诊断或医学建议、把用户的话重复一遍、解释你在做什么。',
+  '',
+  '【输出格式】只输出 JSON，不要代码块标记：',
+  '{"blocks":[{"type":"say","text":"第一段"},{"type":"say","text":"第二段"}],',
+  '"review":{"sceneName":"≤10字","level":1-5,"triggers":["≤8字，最多3个"],',
+  '"action":"用户做了什么，≤40字","effect":"good|ok|bad","next":"下次可换的一个小动作，≤40字"},',
+  '"newScene":null}',
+  '',
+  '【关于 review】这一段是给成长档案用的，用户看不到，请如实概括；听不出就留空字符串。',
+  '【关于 newScene】只有完全装不进「已有场景」时才返回，否则 null。',
+  '',
+  '【已有场景】',
+  '${SCENE_LIST}'
+].join('\n');
+
+/* 兼容旧名字（check-llm.js 与自检工具沿用 prep 提示词） */
+const LLM_SYSTEM_PROMPT = LLM_PREP_PROMPT;
+const LLM_BLOCK_TYPES = { say: 1, empathy: 1, analysis: 1, reframe: 1, script: 1, checklist: 1, breath: 1 };
 
 /* 服务端对模型输出的"兜底裁剪"：即使模型不听话，也不会把屏幕塞满 */
 const BLOCK_TEXT_MAX = 120;      // 单块正文上限
@@ -655,20 +681,49 @@ function createApp(options) {
     return { learned: learned.map((s) => s.doc).filter(Boolean), names: names };
   }
 
-  async function callLLM(text, tendency) {
+  /* 复盘模式：模型顺带返回的结构化字段（给成长档案用，用户看不到） */
+  function validateReviewExtract(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const sceneName = clampText(raw.sceneName, 20);
+    const level = Math.max(1, Math.min(5, parseInt(raw.level, 10) || 3));
+    const triggers = (Array.isArray(raw.triggers) ? raw.triggers : []).map((t) => clampText(t, 12)).filter(Boolean).slice(0, 3);
+    const action = clampText(raw.action, 80);
+    const next = clampText(raw.next, 80);
+    const effect = ['good', 'ok', 'bad'].indexOf(raw.effect) >= 0 ? raw.effect : 'ok';
+    if (!sceneName && !action && !next && !triggers.length) return null;
+    const found = sceneName ? Engine.detectScenes(sceneName, 1) : [];
+    return {
+      sceneId: found.length ? found[0].scene.id : 'party-strangers',
+      sceneName: sceneName || (found.length ? found[0].scene.name : ''),
+      level: level, triggers: triggers, action: action, effect: effect, next: next
+    };
+  }
+
+  async function callLLM(text, tendency, opts) {
+    const o = opts || {};
+    const mode = o.mode === 'review' ? 'review' : 'prep';
     const catalog = await sceneCatalog();
-    const system = LLM_SYSTEM_PROMPT.replace('${SCENE_LIST}', catalog.names.join('、'));
+    const tpl = mode === 'review' ? LLM_REVIEW_PROMPT : LLM_PREP_PROMPT;
+    const system = tpl.replace('${SCENE_LIST}', catalog.names.join('、'));
+    const messages = [{ role: 'system', content: system }];
+    /* 追问上下文：用户补充的信息要带上，否则"再短一点"这种指令模型看不懂 */
+    (Array.isArray(o.context) ? o.context : []).slice(-4).forEach((m) => {
+      const content = clampText(m && m.content, 200);
+      if (content) messages.push({ role: m && m.role === 'assistant' ? 'assistant' : 'user', content: content });
+    });
+    messages.push({
+      role: 'user',
+      content: (mode === 'review' ? '我刚经历的：' : '我的场景：') + text +
+        '\n（画像：' + (tendency === 'i' ? '偏内向' : tendency === 'e' ? '偏外向' : '未设置') + '）'
+    });
     const resp = await fetch(llm.endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + llm.key },
       body: JSON.stringify({
         model: llm.model || 'default',
-        temperature: 0.7,
+        temperature: mode === 'review' ? 0.8 : 0.7,
         max_tokens: 800,          // 限制输出长度：单次成本可控，避免被超长回答放大开销
-        messages: [
-          { role: 'system', content: system },
-          { role: 'user', content: '我的场景：' + text + '\n（画像：' + (tendency === 'i' ? '偏内向' : tendency === 'e' ? '偏外向' : '未设置') + '）' }
-        ]
+        messages: messages
       }),
       signal: AbortSignal.timeout(25000)
     });
@@ -677,11 +732,20 @@ function createApp(options) {
     const content = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
     if (!content) throw Object.assign(new Error('上游返回空内容'), { status: 502 });
     const parsed = JSON.parse(String(content).replace(/```json/g, '').replace(/```/g, '').trim());
-    const blocks = shapeBlocks(parsed && parsed.blocks);
+    const shaped = shapeBlocks(parsed && parsed.blocks);
+    /* 严格按模式过滤：
+       准备页只保留话术（不渲染场景判断/解释/呼吸/清单），复盘页只保留聊天段落。 */
+    const blocks = mode === 'review'
+      ? shaped.filter((b) => b.type === 'say' || b.type === 'empathy')
+      : shaped.filter((b) => b.type === 'script');
     if (!blocks.length) {
       throw Object.assign(new Error('上游返回结构不符合约定'), { status: 502 });
     }
-    return { blocks: blocks, newScene: (parsed && parsed.newScene) || null };
+    return {
+      blocks: blocks,
+      newScene: (parsed && parsed.newScene) || null,
+      review: mode === 'review' ? validateReviewExtract(parsed && parsed.review) : null
+    };
   }
 
   /* ---------------- 学习到的场景：校验（宁可拒绝，也不要污染场景库） ---------------- */
@@ -862,12 +926,13 @@ function createApp(options) {
       }
       const body = await readBody(req, 64 * 1024);
       const text = String(body.text || '').slice(0, 2000);
+      const mode = body.mode === 'review' ? 'review' : 'prep';
+      const context = Array.isArray(body.context) ? body.context.slice(-4) : [];
       if (!text.trim()) { json(res, 400, { error: '内容为空' }); return; }
       if (Engine.safetyCheck(text)) { json(res, 200, { blocks: [Engine.CRISIS_BLOCK], source: 'safety' }); return; }
       try {
         const p = await publicProfile(user.userId);
-        const out = await callLLM(text, p.profile && p.profile.tendency);
-        /* 场景库进化：模型认为现有场景装不下这个情境时，会带回 newScene */
+        const out = await callLLM(text, p.profile && p.profile.tendency, { mode: mode, context: context });
         /* 场景库进化：模型认为现有场景装不下这个情境时，会带回 newScene。
            注意只跟「内置场景」查重：已学过的同名场景要走进"累加使用次数"分支，
            而不是被当成重复而丢掉。 */
@@ -888,7 +953,10 @@ function createApp(options) {
             console.warn('[scenes] 拒收模型提出的新场景：' + v.errors.join('；'));
           }
         }
-        json(res, 200, { blocks: out.blocks, source: 'llm', learned: learned });
+        json(res, 200, {
+          blocks: out.blocks, source: 'llm', learned: learned, mode: mode,
+          review: out.review || null
+        });
       } catch (e) {
         json(res, 502, { error: '大模型调用失败：' + e.message, code: 'llm_failed' });
       }
@@ -1039,5 +1107,5 @@ if (require.main === module) start();
 
 module.exports = {
   createApp, start, createStore, SqliteStore, RedisStore, hashPassword, verifyPassword,
-  LLM_SYSTEM_PROMPT, LLM_BLOCK_TYPES
+  LLM_SYSTEM_PROMPT, LLM_PREP_PROMPT, LLM_REVIEW_PROMPT, LLM_BLOCK_TYPES, shapeBlocks
 };

@@ -104,6 +104,15 @@ function startMock(mode) {
       else if (mode === 'learninvalid') {
         payload.newScene = Object.assign({}, goodScene, { name: '便利店', aliases: ['深夜买东西'], scripts: { open: [], exit: [] } });
         content = JSON.stringify(payload);
+      } else if (mode === 'routereview') {
+        content = JSON.stringify({
+          blocks: [
+            { type: 'say', text: '啊，那种全场没怎么说话的感觉确实挺熬人的。' },
+            { type: 'say', text: '下次可以先跟一个人聊两句。' },
+            { type: 'script', title: '可以直接念的话', groups: [{ label: '开场', items: ['你也来啦'] }] }
+          ],
+          review: { sceneName: '参加多数人陌生的聚会', level: 3, triggers: ['人多', '都是陌生人'], action: '基本没说话', effect: 'good', next: '先找一个人聊两句' }
+        });
       } else if (mode === 'huge') {
         const long = '这是一段故意写得非常非常长的文本'.repeat(20);
         content = JSON.stringify({
@@ -237,7 +246,9 @@ function startMock(mode) {
     const F = jar();
     await F.post('/api/auth/register', { username: '云端同学', password: 'password321' });
     const good = await F.post('/api/coach', { text: '明天面试，有点紧张' });
-    ok('配置后走大模型并返回块结构', good.status === 200 && good.data.source === 'llm' && good.data.blocks.length === 2, JSON.stringify(good.data));
+    ok('准备页走大模型且**只返回话术**（不再有场景判断/解释/呼吸）',
+      good.status === 200 && good.data.source === 'llm' && good.data.mode === 'prep' &&
+      good.data.blocks.every((b) => b.type === 'script'), JSON.stringify(good.data.blocks.map((b) => b.type)));
     const crisis = await F.post('/api/coach', { text: '我觉得活着没意思' });
     ok('危机内容在服务端就被安全兜底拦截（不发给大模型）',
       crisis.status === 200 && crisis.data.source === 'safety' && crisis.data.blocks[0].type === 'safety');
@@ -505,15 +516,41 @@ function startMock(mode) {
     const H = jar();
     await H.post('/api/auth/register', { username: '话痨同学', password: 'password111' });
     const r = await H.post('/api/coach', { text: '明天面试' });
-    ok('块数量被裁到 4 个以内', r.status === 200 && r.data.blocks.length <= 4, String(r.data.blocks.length));
-    const longest = Math.max.apply(null, r.data.blocks.map((b) => (b.text || '').length));
-    ok('单块正文被裁到 121 字以内', longest <= 121, String(longest));
+    ok('准备页只返回话术块（其余类型被过滤）',
+      r.status === 200 && r.data.blocks.every((b) => b.type === 'script'), JSON.stringify(r.data.blocks.map((b) => b.type)));
+    ok('块数量被裁到 4 个以内', r.data.blocks.length <= 4, String(r.data.blocks.length));
     const grp = r.data.blocks.filter((b) => b.type === 'script')[0];
     ok('每组话术最多 3 条', grp && grp.groups[0].items.length <= 3, JSON.stringify(grp && grp.groups[0].items.length));
-    const ana = r.data.blocks.filter((b) => b.type === 'analysis')[0];
-    ok('level 被夹到 1–5', ana && ana.level === 5, JSON.stringify(ana && ana.level));
-    ok('factors 最多 3 条', ana && ana.factors.length <= 3, JSON.stringify(ana && ana.factors.length));
+    ok('单条话术被裁到 65 字以内', grp && grp.groups[0].items[0].length <= 65, String(grp && grp.groups[0].items[0].length));
+    const rv = await H.post('/api/coach', { mode: 'review', text: '今天聚餐我基本没说话' });
+    ok('复盘模式只返回聊天段落（say/empathy）',
+      rv.status === 200 && rv.data.mode === 'review' && rv.data.blocks.every((b) => b.type === 'say' || b.type === 'empathy'),
+      JSON.stringify(rv.data.blocks.map((b) => b.type)));
+    ok('复盘模式的长文本同样被裁剪', rv.data.blocks[0].text.length <= 121, String(rv.data.blocks[0].text.length));
   } finally { await stopServer(hugeApp); hugeMock.server.close(); base = mainBase; }
+
+  /* 复盘模式：朋友式聊天 + 结构化抽取（供成长档案） */
+  const rvMock = await startMock('routereview');
+  const rvApp = createApp({ dataDir: tempDir('review'), llm: { endpoint: rvMock.url, model: 'm', key: 'k' } });
+  await startServer(rvApp);
+  try {
+    const V = jar();
+    await V.post('/api/auth/register', { username: '倾诉同学', password: 'password222' });
+    const r = await V.post('/api/coach', { mode: 'review', text: '今天聚餐我基本没说话，回来一直在想是不是很怪' });
+    ok('复盘回复是纯聊天段落', r.status === 200 && r.data.blocks.length === 2 && r.data.blocks[0].type === 'say',
+      JSON.stringify(r.data.blocks.map((b) => b.type)));
+    ok('**顺带抽出了结构化复盘（场景/等级/效果）**',
+      !!(r.data.review && r.data.review.sceneName && r.data.review.level >= 1), JSON.stringify(r.data.review));
+    ok('场景名被映射回内置场景 id', r.data.review && r.data.review.sceneId === 'party-strangers', JSON.stringify(r.data.review && r.data.review.sceneId));
+    ok('effect 被白名单校验', ['good', 'ok', 'bad'].indexOf(r.data.review.effect) >= 0, r.data.review.effect);
+    ok('复盘模式用的是"朋友"提示词', /用户的朋友/.test(startMock.lastBody || ''));
+    const prep = await V.post('/api/coach', { text: '明天面试' });
+    ok('准备模式用的是"只给话术"提示词', /只给话术/.test(startMock.lastBody || ''));
+    ok('准备模式不返回 review 字段', prep.status === 200 && prep.data.review === null, JSON.stringify(prep.data.review));
+    const ctx = await V.post('/api/coach', { text: '再短一点', mode: 'prep', context: [{ role: 'user', content: '明天面试，先说三句' }] });
+    ok('追问会带上上下文（上一轮用户说的话）',
+      ctx.status === 200 && /先说三句/.test(startMock.lastBody || ''), '上下文未进入请求');
+  } finally { await stopServer(rvApp); rvMock.server.close(); base = mainBase; }
 
   console.log('\n结果：' + pass + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);

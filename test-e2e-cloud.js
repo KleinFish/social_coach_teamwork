@@ -111,15 +111,16 @@ function takeQuiz(device, weakDims) {
   section('离线也能用：先攒一条本机复盘，再注册');
   A.$('suggest').childNodes[0].click();
   ok('未登录时用本地规则引擎回答', A.$('chat').childNodes.length >= 3);
-  A.$('rvScene').value = 'meeting-speak';
-  A.$('rvLevel').value = 5;
-  A.$('rvLevel').dispatchEvent({ type: 'input' });
-  A.$('rvAction').value = '先写三行稿再发言';
-  A.$('rvNext').value = '提前一天写结论句';
-  A.$('rvEffect').childNodes[0].click();   // 第 1 个是"有效"
-  A.$('reviewForm').dispatchEvent({ type: 'submit' });
-  ok('本机已有 1 条复盘', (A.profile() || {}).reviews && A.profile().reviews.length === 1);
-  ok('标记"有效"的做法进入本机策略库', A.profile().strategies.length === 1);
+  /* 复盘改成"像朋友聊天"后，不需要填表：说一句就自动记一笔（本地估算） */
+  A.$('reviewInput').value = '今天组会我发言被打断了，人多有点慌，后来补了一句还行';
+  A.$('reviewSend').click();
+  await until(() => A.profile() && A.profile().reviews && A.profile().reviews.length === 1, 5000);
+  ok('聊一句就自动记进本机档案', !!(A.profile() && A.profile().reviews && A.profile().reviews.length === 1),
+    JSON.stringify((A.profile() || {}).reviews && A.profile().reviews.length));
+  ok('记录里有场景与压力等级', !!(A.profile().reviews[0].sceneName && A.profile().reviews[0].level >= 1),
+    JSON.stringify(A.profile().reviews[0]));
+  ok('复盘页没有填表字段（已改成聊天）',
+    !A.$('rvScene') && !A.$('rvLevel') && !A.$('reviewForm'));
 
   section('设备 A：注册账号（应把本机数据带上去）');
   A.$('cloudUser').value = '集成测试同学';
@@ -139,7 +140,10 @@ function takeQuiz(device, weakDims) {
     const p = await serverProfile();
     return p && p.reviews.length === 1;
   }));
-  ok('服务器上的记录内容正确', (await serverProfile()).reviews[0].action === '先写三行稿再发言', JSON.stringify((await serverProfile()).reviews[0]));
+  ok('服务器上的记录内容正确',
+    (await serverProfile()).reviews[0].sceneName === '在会议上发言' &&
+    (await serverProfile()).reviews[0].level >= 1,
+    JSON.stringify((await serverProfile()).reviews[0]));
 
   section('设备 B：换一台设备登录同一账号');
   const B = makeDevice(base, 'B');
@@ -148,17 +152,11 @@ function takeQuiz(device, weakDims) {
   B.$('cloudForm').dispatchEvent({ type: 'submit' });
   ok('设备 B 登录成功', await until(() => /已登录/.test(B.$('cloudPill').textContent)), B.$('cloudPill').textContent);
   ok('设备 B 取回了设备 A 的记录', await until(() => (B.profile() || {}).reviews && B.profile().reviews.length === 1), JSON.stringify(B.profile()));
-  ok('设备 B 的策略库同步到位', (B.profile() || {}).strategies.length === 1);
 
   section('设备 B 新增一条复盘并同步');
-  B.$('rvScene').value = 'party-strangers';
-  B.$('rvLevel').value = 2;
-  B.$('rvLevel').dispatchEvent({ type: 'input' });
-  B.$('rvAction').value = '问了对方周末安排';
-  B.$('rvNext').value = '多准备两个开放问题';
-  B.$('rvEffect').childNodes[0].click();   // 第 1 个是"有效"
-  B.$('reviewForm').dispatchEvent({ type: 'submit' });
-  ok('设备 B 本机有 2 条', B.profile().reviews.length === 2);
+  B.$('reviewInput').value = '同学聚会人都很陌生，我主动问了对方周末安排，聊得还行';
+  B.$('reviewSend').click();
+  ok('设备 B 本机有 2 条', await until(() => B.profile().reviews.length === 2, 5000), String(B.profile().reviews.length));
   ok('自动同步把 2 条推上服务器', await until(async () => ((await serverProfile()) || { reviews: [] }).reviews.length === 2), String(((await serverProfile()) || { reviews: [] }).reviews.length));
 
   section('设备 A 再次同步：双向合并且不互相覆盖');
@@ -166,11 +164,12 @@ function takeQuiz(device, weakDims) {
   ok('设备 A 合并到 2 条（不是覆盖）', await until(() => A.profile().reviews.length === 2), String(A.profile().reviews.length));
   const serverAfter = await serverProfile();
   ok('服务器条数未因同步而减少', serverAfter.reviews.length === 2, String(serverAfter.reviews.length));
-  ok('两条记录都保留（时间升序）',
-    serverAfter.reviews[0].sceneId === 'meeting-speak' && serverAfter.reviews[1].sceneId === 'party-strangers',
+  ok('两条记录都保留（场景各不相同）',
+    new Set(serverAfter.reviews.map((r) => r.sceneId)).size === 2,
     JSON.stringify(serverAfter.reviews.map((r) => r.sceneId)));
-  ok('策略库由合并后的复盘重建，无重复',
-    serverAfter.strategies.length === 2, JSON.stringify(serverAfter.strategies));
+  ok('策略库按"有效且有具体动作"重建（本地估算没有动作 → 无策略）',
+    Array.isArray(serverAfter.strategies) && serverAfter.strategies.length === 0,
+    JSON.stringify(serverAfter.strategies));
 
   section('画像设置也会同步');
   B.$('tendencyChips').childNodes[0].click();

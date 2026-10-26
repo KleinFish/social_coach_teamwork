@@ -66,7 +66,6 @@
     autoSync: cloudPrefs.autoSync !== false,
     busy: false
   };
-  var reviewDraft = { triggers: [], effect: 'ok' };
   var lastPrepScene = null;   // 上一次「准备」命中的场景 {id,name,keywords}，用于解释判断依据
 
   /* ---------------- 标签页 ---------------- */
@@ -77,7 +76,7 @@
     var panels = document.querySelectorAll('.panel');
     for (i = 0; i < panels.length; i++) panels[i].classList.toggle('active', panels[i].id === 'panel-' + tab);
     if (tab === 'me') renderMe();
-    if (tab === 'review') renderReviewStage();
+    if (tab === 'review') { reviewSessionSaved = false; renderReviewChat(); }
     if (tab === 'test') renderTestPanel();
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
@@ -86,7 +85,8 @@
   }
 
   /* ---------------- 消息渲染 ---------------- */
-  function addMessage(role, content) {
+  function appendMessage(host, role, content) {
+    if (!host) return null;
     var msg = el('div', 'msg ' + role);
     msg.appendChild(el('div', 'avatar', role === 'user' ? '我' : '◎'));
     var bubble = el('div', 'bubble');
@@ -95,10 +95,11 @@
     else stack.appendChild(content);
     bubble.appendChild(stack);
     msg.appendChild(bubble);
-    $('#chat').appendChild(msg);
-    $('#chat').scrollTop = $('#chat').scrollHeight;
+    host.appendChild(msg);
+    host.scrollTop = host.scrollHeight;
     return msg;
   }
+  function addMessage(role, content) { return appendMessage($('#chat'), role, content); }
   function addUser(text) { addMessage('user', text); }
   function typingNode() {
     var t = el('div', 'typing');
@@ -187,9 +188,31 @@
     return wrap;
   }
 
+  var renderCtx = null;   // {mode, sender}：渲染时的上下文，决定"备选场景"点了往哪发
   function renderBlock(b) {
     var box;
+    var ctx = renderCtx;
     switch (b.type) {
+      /* 准备页顶部的一行小字：告诉用户"我按哪个场景准备的"，认错了可以一键换 */
+      case 'sceneHint':
+        box = el('div', 'scene-hint');
+        box.appendChild(el('span', 'sh-main',
+          (b.guess ? '我先按「' : '按「') + (b.scene || '待确认') + '」' + (b.guess ? '准备' : '准备') +
+          (b.level ? ' · ' + b.level + '/5' : '')));
+        (b.alternatives || []).forEach(function (name) {
+          var btn = el('button', 'sh-alt', name);
+          btn.addEventListener('click', function () {
+            var say = '就用「' + name + '」这个场景来' + (ctx && ctx.mode === 'review' ? '复盘' : '准备');
+            if (ctx && ctx.sender) ctx.sender(say); else send(say);
+          });
+          box.appendChild(btn);
+        });
+        return box;
+
+      /* 复盘页的"朋友式聊天"段落：纯文字，不做成卡片，看起来才像在聊天 */
+      case 'say':
+        return el('div', 'text', b.text);
+
       case 'empathy':
         box = el('div', 'block empathy');
         box.appendChild(el('div', 'text', b.text));
@@ -212,11 +235,15 @@
         }
         if (b.alternatives && b.alternatives.length) {
           // 用户反馈"提示我点场景按钮，但我找不到按钮"→ 直接把备选场景做成按钮，点一下就切换
+          // 注意：在哪个面板渲染就往哪个面板发（准备页发的进准备，复盘页发的进复盘）
           var row = el('div', 'alt-row');
           row.appendChild(el('span', 'alt-label', '也可能是：'));
           b.alternatives.forEach(function (name) {
             var btn = el('button', 'alt-btn', name);
-            btn.addEventListener('click', function () { send('就用「' + name + '」这个场景来准备'); });
+            btn.addEventListener('click', function () {
+              var say = '就用「' + name + '」这个场景来' + (ctx && ctx.mode === 'review' ? '复盘' : '准备');
+              if (ctx && ctx.sender) ctx.sender(say); else send(say);
+            });
             row.appendChild(btn);
           });
           row.appendChild(el('span', 'alt-hint', '点一下即可切换'));
@@ -290,8 +317,14 @@
         return box;
     }
   }
-  function renderBlocks(host, blocks) {
-    (blocks || []).forEach(function (b) { host.appendChild(renderBlock(b)); });
+  function renderBlocks(host, blocks, opts) {
+    var prev = renderCtx;
+    renderCtx = opts || null;
+    try {
+      (blocks || []).forEach(function (b) { host.appendChild(renderBlock(b)); });
+    } finally {
+      renderCtx = prev;
+    }
   }
 
   /* ---------------- 云端：账号、同步、大模型代理 ---------------- */
@@ -311,14 +344,17 @@
   function errText(res) { return (res && res.data && res.data.error) || '网络异常，请稍后再试'; }
 
   // 大模型走服务端代理：API Key 只存在服务器，浏览器拿不到，也没有跨域问题
-  function serverCoach(text) {
+  // mode: 'prep'（只给话术）/ 'review'（朋友式聊天 + 顺手抽取结构化复盘）
+  function serverCoach(text, opts) {
+    var o = opts || {};
     if (!cloud.available || !cloud.user || !cloud.llm) return Promise.resolve(null);
-    return apiJson('/api/coach', { method: 'POST', body: JSON.stringify({ text: text }) })
-      .then(function (res) {
-        if (!res.ok || !res.data.blocks) return null;
-        return { blocks: res.data.blocks, learned: res.data.learned || null };
-      })
-      .catch(function () { return null; });
+    return apiJson('/api/coach', {
+      method: 'POST',
+      body: JSON.stringify({ text: text, mode: o.mode || 'prep', context: o.context || [] })
+    }).then(function (res) {
+      if (!res.ok || !res.data.blocks) return null;
+      return { blocks: res.data.blocks, learned: res.data.learned || null, review: res.data.review || null };
+    }).catch(function () { return null; });
   }
 
   /**
@@ -486,10 +522,12 @@
     });
   }
 
+  var prepHistory = [];         // 准备页用户说过的话：追问"再短一点"时要带上
   function send(text) {
     text = (text || '').trim();
     if (!text) return;
     addUser(text);
+    prepHistory.push({ role: 'user', content: text });
     $('#input').value = '';
     autoGrow();
     var holder = addMessage('assistant', typingNode());
@@ -512,9 +550,10 @@
         return {
           blocks: [{
             type: 'checklist',
-            title: '这次已经结束了，建议换个方式',
-            items: ['去「复盘」标签页，1 分钟填完结构化复盘', '只需要写：触发点、你做了什么、下次换哪个小动作'],
-            hint: '复盘的目的是把"事后反刍"关掉，而不是再想一遍细节。'
+            title: '这次已经结束了，去「复盘」聊两句吧',
+            items: ['点下面的「复盘」标签，像跟朋友说话一样讲一遍',
+                    '它会帮你把场景和压力来源讲清楚，并自动记进成长档案'],
+            hint: '不用组织语言，也不用填表。'
           }]
         };
       }
@@ -529,13 +568,11 @@
     var local = localReply();
     if (local.crisis || !cloud.user || !cloud.llm) { show(local.blocks); return; }
 
-    serverCoach(text).then(function (res) {
+    serverCoach(text, { mode: 'prep', context: prepHistory.slice(-4) }).then(function (res) {
       if (res && res.blocks && res.blocks.length) {
-        var normalized = res.blocks.slice();
-        if (normalized[0].type !== 'empathy') {
-          normalized.unshift({ type: 'empathy', text: '先说一句：在任何场景里紧一下，都是很常见的反应。' });
-        }
-        show(normalized);
+        // 大模型只负责话术；顶部那行"按哪个场景准备"用本地识别结果（可点切换）
+        var hint = (local.blocks || []).filter(function (b) { return b.type === 'sceneHint'; })[0];
+        show(hint ? [hint].concat(res.blocks) : res.blocks);
         if (res.learned) {
           // 场景库自己长了一类：告诉用户，并立刻把新场景拉下来供下次使用
           toast(res.learned.isNew
@@ -543,11 +580,11 @@
             : '「' + res.learned.name + '」这个场景又用了一次');
           loadLearnedScenes();
         } else {
-          toast('已由大模型生成');
+          toast('话术已更新，可以照着念；要改就直接说，比如"再短一点"');
         }
       } else {
         show(local.blocks);
-        toast('大模型暂时不可用，已用本地引擎回答');
+        toast('大模型暂时不可用，已用本地话术库回答');
       }
     });
   }
@@ -613,90 +650,105 @@
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
-  /* ---------------- 社交后复盘 ---------------- */
-  function renderReviewStage() {
-    var sel = $('#rvScene');
-    if (!sel.options.length) {
-      E.SCENES.forEach(function (s) {
-        var o = el('option', null, s.name + '（基准压力 ' + s.level + '/5）');
-        o.value = s.id;
-        sel.appendChild(o);
-      });
-      sel.value = 'eat-unfamiliar';
-    }
-    var trigBox = $('#rvTriggers');
-    if (!trigBox.children.length) {
-      E.TRIGGER_OPTIONS.forEach(function (t) {
-        var c = el('button', 'chip', t);
-        c.type = 'button';
-        c.addEventListener('click', function () {
-          var i = reviewDraft.triggers.indexOf(t);
-          if (i >= 0) reviewDraft.triggers.splice(i, 1); else reviewDraft.triggers.push(t);
-          c.classList.toggle('on');
-        });
-        trigBox.appendChild(c);
-      });
-    }
-    var effBox = $('#rvEffect');
-    if (!effBox.children.length) {
-      E.EFFECT_OPTIONS.forEach(function (o) {
-        var c = el('button', 'chip' + (o.value === 'ok' ? ' on' : ''), o.label);
-        c.type = 'button';
-        c.dataset.value = o.value;
-        c.addEventListener('click', function () {
-          reviewDraft.effect = o.value;
-          var all = effBox.querySelectorAll('.chip');
-          for (var i = 0; i < all.length; i++) all[i].classList.remove('on');
-          c.classList.add('on');
-        });
-        effBox.appendChild(c);
-      });
-    }
-  }
-  $('#rvLevel').addEventListener('input', function () {
-    $('#rvLevelBadge').textContent = this.value + '/5 ' + E.LEVEL_LABELS[+this.value];
-  });
-  $('#rvDemo').addEventListener('click', function () {
-    $('#rvScene').value = 'meeting-speak';
-    $('#rvLevel').value = 4;
-    $('#rvLevel').dispatchEvent(new Event('input'));
-    $('#rvAction').value = '先写三行稿，发言时先给结论';
-    $('#rvNext').value = '提前一天写下结论句，会上第一个发言';
-    reviewDraft.triggers = ['要当众说话', '怕说错'];
-    var chips = $('#rvTriggers').querySelectorAll('.chip');
-    for (var i = 0; i < chips.length; i++) chips[i].classList.toggle('on', reviewDraft.triggers.indexOf(chips[i].textContent) >= 0);
-    reviewDraft.effect = 'good';
-    var effs = $('#rvEffect').querySelectorAll('.chip');
-    for (var j = 0; j < effs.length; j++) effs[j].classList.toggle('on', effs[j].dataset.value === 'good');
-    toast('已填入一份示例，可以直接点"完成复盘"');
-  });
-  $('#reviewForm').addEventListener('submit', function (e) {
-    e.preventDefault();
-    var result = E.buildReview({
-      sceneId: $('#rvScene').value,
-      level: $('#rvLevel').value,
-      triggers: reviewDraft.triggers,
-      action: $('#rvAction').value,
-      effect: reviewDraft.effect,
-      next: $('#rvNext').value
+  /* ---------------- 社交后复盘：像朋友一样聊天，不填表 ---------------- */
+  var reviewHistory = [];       // 用户说过的话，作为追问上下文
+  var reviewSessionSaved = false;   // 一次复盘对话只落一条记录，避免刷屏式重复
+  var REVIEW_SUGGESTS = [
+    '今天聚餐我基本没说话，回来一直在想是不是很怪',
+    '组会上我发言被同学打断了，当时脑子一片空白',
+    '刚认识的同学约我周末出去，我答应了但现在很慌'
+  ];
+
+  function renderReviewSuggest() {
+    var box = $('#reviewSuggest');
+    if (!box || box.children.length) return;
+    REVIEW_SUGGESTS.forEach(function (s) {
+      var b = el('button', null, s);
+      b.addEventListener('click', function () { sendReview(s); });
+      box.appendChild(b);
     });
-    profile = E.addReview(profile, result.record);
-    store(PROFILE_KEY, profile);
-    scheduleSync();
-    var host = $('#reviewResult');
-    host.innerHTML = '';
-    var card = el('div', 'card review-result');
-    card.appendChild(el('div', 'card-title-row')).appendChild(el('h2', null, '这次复盘结束了'));
-    var ul = el('ul');
-    result.summary.forEach(function (t) { ul.appendChild(el('li', null, t)); });
-    card.appendChild(ul);
-    if (result.record.effect === 'good') {
-      card.appendChild(el('p', 'hint', '已存入策略库：' + result.record.action));
+  }
+
+  function renderReviewChat() {
+    renderReviewSuggest();
+    if (reviewHistory.length) return;          // 已经聊过，不覆盖
+    var host = $('#reviewChat');
+    if (!host || host.children.length) return;
+    appendMessage(host, 'bot', '刚才那场社交，你是什么感觉？不用组织语言，想到什么说什么就行——我不会让你填表。');
+  }
+
+  function reviewTyping(host) {
+    var wrap = appendMessage(host, 'bot', typingNode());
+    return wrap;
+  }
+
+  function sendReview(raw) {
+    var host = $('#reviewChat');
+    var field = $('#reviewInput');
+    var text = String(raw || (field && field.value) || '').trim();
+    if (!text) return;
+    if (field && !raw) field.value = '';
+
+    appendMessage(host, 'user', text);
+    reviewHistory.push({ role: 'user', content: text });
+    var typing = reviewTyping(host);
+
+    function finish(blocks, reviewExtract, source) {
+      if (typing && typing.parentNode) typing.parentNode.removeChild(typing);
+      // 复盘里的"备选场景"要发回复盘页，而不是准备页
+      renderBlocks(host, blocks, { mode: 'review', sender: function (t) { sendReview(t); } });
+      host.scrollTop = host.scrollHeight;
+      if (reviewExtract && !reviewSessionSaved) {
+        // 用抽出的结构化字段记一笔（成长档案/策略库照常工作），用户不需要填任何东西
+        var result = E.buildReview({
+          sceneId: reviewExtract.sceneId,
+          sceneName: reviewExtract.sceneName,
+          level: reviewExtract.level,
+          triggers: reviewExtract.triggers,
+          action: reviewExtract.action,
+          effect: reviewExtract.effect,
+          next: reviewExtract.next
+        });
+        profile = E.addReview(profile, result.record);
+        store(PROFILE_KEY, profile);
+        scheduleSync();
+        reviewSessionSaved = true;
+        toast('已经记进成长档案：' + result.record.sceneName + ' · ' + result.record.level + '/5');
+      } else if (source === 'local' && !reviewSessionSaved) {
+        // 没接大模型时，用本地粗略抽取先记一笔（登录后还能同步上去）
+        var guess = E.guessReview(text);
+        var local = E.buildReview(guess);
+        profile = E.addReview(profile, local.record);
+        store(PROFILE_KEY, profile);
+        scheduleSync();
+        reviewSessionSaved = true;
+        toast('已记一笔到本机档案（' + local.record.sceneName + ' · ' + local.record.level + '/5）');
+      }
     }
-    host.appendChild(card);
-    toast('已保存到本机档案');
-    $('#rvAction').value = '';
-    $('#rvNext').value = '';
+
+    serverCoach(text, { mode: 'review', context: reviewHistory.slice(-4) }).then(function (res) {
+      if (res && res.blocks && res.blocks.length) {
+        finish(res.blocks, res.review, 'llm');
+        if (res.learned) {
+          toast(res.learned.isNew
+            ? '学到了新场景：「' + res.learned.name + '」已加入场景库'
+            : '「' + res.learned.name + '」这个场景又用了一次');
+          loadLearnedScenes();
+        }
+        return;
+      }
+      var local = E.buildReviewReply(text, profile);
+      if (local.crisis) { finish([E.CRISIS_BLOCK], null, 'crisis'); return; }
+      finish(local.blocks, null, 'local');
+      // 本地模式也给一条可点击的引导，让"记一笔"这条路径不至于断掉
+      var hint = el('div', 'soft-note', '想把它记进成长档案？登录并接上大模型后，这段倾诉会自动变成一条复盘记录。');
+      host.appendChild(hint);
+    });
+  }
+
+  $('#reviewSend').addEventListener('click', function () { sendReview(); });
+  $('#reviewInput').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendReview(); }
   });
 
   /* ---------------- 社交画像测试 ---------------- */
@@ -1213,7 +1265,7 @@
       : (!cloud.user && server) ? '语音输入（登录后可稳定使用，微信里也行）'
         : (native && !cloud.user) ? '语音输入（浏览器识别）'
           : '语音输入';
-    ['micInput', 'micAction', 'micNext'].forEach(function (id) {
+    ['micInput', 'micReview'].forEach(function (id) {
       var btn = $('#' + id);
       if (!btn) return;
       btn.classList.toggle('hidden', !usable);
@@ -1284,8 +1336,7 @@
   }
 
   bindMic('micInput', 'input');
-  bindMic('micAction', 'rvAction');
-  bindMic('micNext', 'rvNext');
+  bindMic('micReview', 'reviewInput');
   $('#voiceStop').addEventListener('click', function () { stopVoice(); });
   /* 状态条整体可点：手机上更容易按到"停止" */
   $('#voiceBar').addEventListener('click', function (e) {
@@ -1496,7 +1547,7 @@
   }
   renderSuggests();
   renderSosGrid();
-  renderReviewStage();
+  renderReviewChat();
   renderCloud();
   renderMe();
   renderVoiceButtons();

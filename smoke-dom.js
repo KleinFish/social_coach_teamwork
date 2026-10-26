@@ -46,21 +46,21 @@ ok('首屏有欢迎消息', $('chat').childNodes.length >= 2, String($('chat').c
 ok('场景快选渲染了 6 条', $('suggest').childNodes.length === 6);
 ok('应急按钮与引擎一致', $('sosGrid').childNodes.length === Engine.EMERGENCY.length, String($('sosGrid').childNodes.length));
 
-section('社交前准备');
+section('社交前准备（只给话术）');
 const before = $('chat').childNodes.length;
 $('suggest').childNodes[0].click();
 ok('一次准备对话产生两条消息', $('chat').childNodes.length === before + 2);
 const lastStack = $('chat').childNodes[$('chat').childNodes.length - 1].querySelector('.stack');
-ok('回复包含 6 个区块', lastStack.childNodes.length >= 6, String(lastStack.childNodes.length));
-ok('渲染了压力等级条', lastStack.querySelectorAll('.meter').length >= 1);
-const breathBtn = lastStack.querySelectorAll('.btn').find((b) => /开始 30 秒/.test(b.textContent));
-ok('有 30 秒呼吸卡片按钮', !!breathBtn);
-if (breathBtn) {
-  breathBtn.click();
-  ok('点击后进入计时', /暂停/.test(breathBtn.textContent));
-  breathBtn.click();
-  ok('可暂停', /继续/.test(breathBtn.textContent));
-}
+ok('回复 = 一行场景提示 + 一组话术（不再有压力分析卡/呼吸卡/清单）',
+  lastStack.childNodes.length === 2 &&
+  lastStack.childNodes[0].classList.contains('scene-hint') &&
+  lastStack.childNodes[1].classList.contains('script'),
+  '块数 ' + lastStack.childNodes.length);
+ok('场景提示是一行小字，写着按哪个场景准备',
+  /按「.+」准备/.test(lastStack.childNodes[0].textContent), lastStack.childNodes[0].textContent);
+ok('不再渲染压力等级条', lastStack.querySelectorAll('.meter').length === 0);
+ok('不再有 30 秒呼吸卡片',
+  !lastStack.querySelectorAll('.btn').some((b) => /开始 30 秒/.test(b.textContent)));
 ok('给出可直接念的话术', lastStack.querySelectorAll('.g-item').length >= 5);
 
 section('社交中应急');
@@ -68,16 +68,12 @@ $('sosGrid').childNodes[3].click();
 const bigSay = $('sosResult').querySelectorAll('.big-say');
 ok('应急页给出可直接念的一句话', bigSay.length === 1 && bigSay[0].textContent.length > 0, bigSay[0] && bigSay[0].textContent);
 
-section('社交后复盘');
-$('rvLevel').value = 4;
-$('rvLevel').dispatchEvent({ type: 'input' });
-ok('焦虑徽标跟随滑块', /4\/5/.test($('rvLevelBadge').textContent));
-$('rvDemo').click();
-$('reviewForm').dispatchEvent({ type: 'submit' });
-ok('复盘结果渲染成功', $('reviewResult').childNodes.length > 0);
-const saved = JSON.parse(box.storage.get('social-coach.profile.v1'));
-ok('复盘写入本机存储', saved && saved.reviews.length === 1);
-ok('有效做法进入策略库', saved && saved.strategies.length === 1);
+section('社交后复盘（像朋友一样聊天，不填表）');
+ok('复盘页是聊天界面（有输入框与发送）', !!$('reviewChat') && !!$('reviewInput') && !!$('reviewSend'));
+ok('复盘页已没有填表字段', !$('rvScene') && !$('rvLevel') && !$('reviewForm'));
+ok('首次进入有一条引导语', $('reviewChat').childNodes.length >= 1, String($('reviewChat').childNodes.length));
+ok('复盘页有可点的倾诉示例', $('reviewSuggest').childNodes.length >= 1, String($('reviewSuggest').childNodes.length));
+ok('复盘不再有"完成复盘/填示例"这类表单按钮', !$('rvDemo'));
 
 section('成长档案');
 $('tendencyChips').childNodes[0].click();
@@ -143,8 +139,9 @@ const chatBefore = $('chat').childNodes.length;
 box.byId['input'].value = '明天课堂展示，有点紧张';
 $('sendBtn').click();
 const prepText = $('chat').childNodes[$('chat').childNodes.length - 1].textContent;
-ok('准备回复里带上了画像预测', /自评/.test(prepText), prepText.slice(0, 80));
-ok('偏吃力的场景会先强调稳住状态', /偏吃力|先花 30 秒/.test(prepText));
+ok('准备回复只有话术（不再显示场景判断/自评提示）',
+  prepText.indexOf('可以直接念的话') >= 0, prepText.slice(0, 60));
+ok('准备页不再出现"自评/偏吃力"这类分析文案', !/自评|偏吃力/.test(prepText), prepText.slice(0, 80));
 
 section('画像展示在档案里');
 ok('档案标签显示已测试', /已测试/.test($('assessTag').textContent), $('assessTag').textContent);
@@ -154,7 +151,7 @@ ok('档案里也有雷达图与预测小结',
 section('语音输入（注入假的浏览器识别器）');
 ok('无语音能力时麦克风按钮隐藏', (function () {
   const b = boot({ fetch: () => Promise.reject(new Error('offline')) });
-  return b.byId['micInput'].classList.contains('hidden') && b.byId['micAction'].classList.contains('hidden');
+  return b.byId['micInput'].classList.contains('hidden') && b.byId['micReview'].classList.contains('hidden');
 })());
 
 /* 注入假 SpeechRecognition，走通"点击 → 识别 → 回填输入框"的完整链路 */
@@ -195,8 +192,8 @@ $v('micInput').click();
 FakeSR.last.onerror({ error: 'not-allowed' });
 ok('识别出错时给出提示并复位',
   $v('voiceBar').classList.contains('hidden') && !$v('micInput').classList.contains('rec'));
-ok('录音字段也有麦克风按钮（复盘页两处）',
-  !$v('micAction').classList.contains('hidden') && !$v('micNext').classList.contains('hidden'));
+ok('复盘页的输入框也有麦克风按钮',
+  !$v('micReview').classList.contains('hidden'));
 
 section('CSP 约束：页面内不允许内联样式属性');
 ok('HTML 中不含内联 style 属性', html.indexOf('style="') === -1);
@@ -299,14 +296,13 @@ const pPress = (async function pressAndHold() {
   $p('micInput').dispatchEvent({ type: 'pointercancel' });
   ok('手势被系统打断时也会停止（不会一直录）', $p('voiceBar').classList.contains('hidden'));
 
-  ok('复盘页的按住说话按钮同样可用',
-    !$p('micAction').classList.contains('hidden') && !$p('micNext').classList.contains('hidden'));
-  $p('micAction').dispatchEvent({ type: 'pointerdown' });
+  ok('复盘页的按住说话按钮同样可用', !$p('micReview').classList.contains('hidden'));
+  $p('micReview').dispatchEvent({ type: 'pointerdown' });
   ok('复盘输入框的按压手势也进入录音', !$p('voiceBar').classList.contains('hidden'));
   FakeSR.last.emit([{ isFinal: true, 0: { transcript: '我先说了一句兜底的话' } }]);
   FakeSR.last.end();
   await sleep(20);
-  ok('识别结果写入复盘输入框', /我先说了一句兜底的话/.test($p('rvAction').value), $p('rvAction').value);
+  ok('识别结果写入复盘输入框', /我先说了一句兜底的话/.test($p('reviewInput').value), $p('reviewInput').value);
 })();
 
 /* ---------- 场景五：识别器"一启动就失败"之后还能不能再用（回归） ---------- */
@@ -350,8 +346,8 @@ FakeSRFailFast.count = 0;
   await sleep(30);
   const r1 = lastReply();
   ok('第一句没有跑偏到宿舍场景（旧版会给"你几点睡"）', r1.indexOf('几点睡') === -1, r1.slice(0, 90));
-  ok('按"线上加了好友"场景给建议', /线上加了好友|第一句/.test(r1), r1.slice(0, 60));
-  ok('给了可以直接发的开场话术', /加个好友|就加一下/.test(r1), r1.slice(0, 120));
+  ok('给的是"线上加好友"场景的话术', /加个好友|就加一下/.test(r1), r1.slice(0, 60));
+  ok('话术可以直接发出去（不再是场景分析）', /开场/.test(r1) && r1.indexOf('场景：') === -1, r1.slice(0, 60));
 
   $w('input').value = '为什么你觉得这是舍友见面';
   $w('sendBtn').click();
@@ -361,24 +357,30 @@ FakeSRFailFast.count = 0;
   ok('如实说明是关键词匹配', /关键词/.test(r2), r2.slice(0, 90));
   ok('并告诉用户怎么纠正', /不是宿舍|更具体/.test(r2), r2.slice(0, 140));
 
-  /* 用户反馈：提示"点场景按钮"但找不到按钮 → 备选场景现在直接可点 */
-  console.log('\n【场景七】找不到"场景按钮" → 备选场景改成可点按钮');
+  /* 场景判断 + 备选场景切换，现在属于复盘模块 */
+  console.log('\n【场景七】复盘里的场景判断与备选切换');
   const altBox = boot({ fetch: () => Promise.reject(new Error('offline')) });
   const $a = (id) => altBox.byId[id];
-  $a('input').value = '要去社团面试，会群面';
-  $a('sendBtn').click();
-  await sleep(30);
-  const alts = $a('chat').querySelectorAll('.alt-btn');
   const textOf = (n) => (n.textContent || '') + ' ' + ((n.childNodes || []).map(textOf).join(' '));
-  ok('备选场景渲染成了按钮（不再是一句"点下方场景按钮"）', alts.length >= 1, '按钮数 ' + alts.length);
-  ok('页面上不再出现"场景按钮"这种找不到的措辞', textOf($a('chat')).indexOf('场景按钮') === -1);
+  $a('reviewInput').value = '要去社团面试，会群面，回来觉得没发挥好';
+  $a('reviewSend').click();
+  await sleep(40);
+  const rvHost = $a('reviewChat');
+  const rvAll = textOf(rvHost);
+  ok('复盘回复里有场景判断（显示场景与压力）', /场景：/.test(rvAll) && /\/5/.test(rvAll), rvAll.slice(0, 100));
+  ok('复盘回复里有换个角度的解释', rvAll.length > 40, rvAll.slice(0, 100));
+  const alts = rvHost.querySelectorAll('.alt-btn');
+  ok('备选场景渲染成了可点按钮', alts.length >= 1, '按钮数 ' + alts.length);
+  ok('页面上不再出现"场景按钮"这种找不到的措辞', rvAll.indexOf('场景按钮') === -1);
   const firstAlt = alts[0];
   const altName = firstAlt && firstAlt.textContent;
   if (firstAlt) firstAlt.click();
-  await sleep(30);
-  const r3 = textOf($a('chat').childNodes[$a('chat').childNodes.length - 1]);
-  ok('点一下备选场景就能切换（回复里出现该场景名）',
-    !!altName && r3.indexOf(altName) >= 0, '点了「' + altName + '」，回复：' + r3.slice(0, 70));
+  await sleep(60);
+  const r3 = textOf(rvHost);
+  ok('点一下备选场景就能切换（复盘里重新按该场景分析）',
+    !!altName && r3.indexOf(altName) >= 0, '点了「' + altName + '」');
+  ok('点备选场景不会跑到"准备"页去',
+    textOf($a('chat')).indexOf('就用「') === -1, textOf($a('chat')).slice(0, 40));
   ok('输入框上方有"场景入口"的提示文案',
     /不想打字/.test(html) && /suggest-cap/.test(html));
 
@@ -417,8 +419,7 @@ FakeSRFailFast.count = 0;
   await sleep(40);
   const learnedReply = textOf($l('chat').childNodes[$l('chat').childNodes.length - 1]);
   ok('**学到的场景能被本地识别并给出它自己的话术**',
-    learnedReply.indexOf('深夜便利店碰熟人') >= 0 && learnedReply.indexOf('你也这么晚啊') >= 0,
-    learnedReply.slice(0, 90));
+    learnedReply.indexOf('你也这么晚啊') >= 0, learnedReply.slice(0, 90));
 
   console.log('\n结果：' + pass + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);

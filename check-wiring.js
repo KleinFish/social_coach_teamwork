@@ -41,8 +41,8 @@ report(scriptOrder2.join(',') === 'coach-engine.js,assessment.js,voice.js,app.js
   '脚本加载顺序正确：' + scriptOrder2.join(' → '));
 report(/<script src="[^"]+\?v=\d/.test(html) && /href="styles\.css\?v=\d/.test(html),
   '前端资源带版本号（避免微信/浏览器缓存旧 JS 导致功能不生效）');
-report(['micInput', 'micAction', 'micNext', 'voiceBar', 'voiceStop'].every(id => htmlIds.has(id)),
-  '三处输入框都配了麦克风按钮，并有全局录音状态条');
+report(['micInput', 'micReview', 'voiceBar', 'voiceStop'].every(id => htmlIds.has(id)),
+  '两处输入框（准备/复盘）都配了麦克风按钮，并有全局录音状态条');
 report(/SocialVoice/.test(app) && /api\/transcribe/.test(app), 'app.js 已接入语音模块与服务端转写');
 report(/\/api\/transcribe/.test(server), '服务端提供转写代理接口');
 report(/"max_tokens":\s*\d+|max_tokens:\s*\d+/.test(server), '大模型请求带 max_tokens（单次成本上限）');
@@ -101,12 +101,34 @@ report(/SCENE_LEARNING/.test(server) && /SCENE_LIMIT/.test(server), '场景学�
 report(/newScene/.test(server), '提示词要求模型在场景装不下时给出 newScene');
 report(/已有场景/.test(server), '提示词把已有场景清单给模型（避免重复造场景）');
 report(/shapeBlocks/.test(server) && /MAX_BLOCKS = 4/.test(server), '服务端会裁剪过长的模型输出（不会糊满屏幕）');
-report(/不超过 180 字/.test(server) && /32 个字/.test(server), '提示词限定了总字数与单句长度');
-report(/禁止这些空话/.test(server), '提示词禁用了套话（更生动）');
+report(/32 个字/.test(server) && /(不超过 150 字|不超过 180 字)/.test(server), '提示词限定了总字数与单句长度');
+report(/深呼吸|放轻松/.test(server) && /不要写/.test(server), '提示词禁用了套话（更生动）');
 report(/loadLearnedScenes/.test(app) && /extendScenes/.test(app), '前端启动时把学习场景注入本地引擎');
 report(htmlIds.has('learnedBox') && /renderLearned/.test(app), '档案页有"场景库的自我进化"展示区');
 const envExample = fs.readFileSync(path.join(dir, '.env.example'), 'utf8');
 report(/SCENE_LEARNING/.test(envExample), '.env.example 记录了场景学习开关');
+
+/* ---- 产品改版（用户决策）：准备只给话术 / 复盘像朋友聊天 / 删掉场景判断·解释·呼吸 ---- */
+console.log('\n== 2f. 准备只给话术 + 复盘改成朋友式聊天 ==');
+report(/LLM_PREP_PROMPT/.test(server) && /只给话术/.test(server), '准备页提示词明确"只给话术"');
+report(/LLM_REVIEW_PROMPT/.test(server) && /用户的朋友/.test(server), '复盘页提示词是"朋友式聊天"');
+report(/mode === 'review'/.test(server) && /'say'/.test(server), '服务端按模式分流（复盘返回 say 段落）');
+report(/validateReviewExtract/.test(server) && /review: out\.review/.test(server), '复盘顺手抽出结构化字段供成长档案');
+report(/filter\(\(b\) => b\.type === 'script'\)/.test(server), '准备模式在服务端强制只保留话术块（防模型乱返回）');
+/* 呼吸与"场景判断/解释"不再出现在准备页 */
+const engineNoPrepHardcode = !/type: 'breath'/.test(engineSrc);
+report(engineNoPrepHardcode, '引擎不再生成呼吸块');
+report(/type: 'sceneHint'/.test(engineSrc) && /type: 'script',\s*\n?\s*title: '可以直接念的话'/.test(engineSrc),
+  '本地准备回复 = 一行场景提示 + 话术块');
+report(/case 'sceneHint'/.test(app) && /\.scene-hint/.test(cssSrc), '前端渲染这行场景提示（含可点的备选场景）');
+report(/sceneHint/.test(app) && /hint \? \[hint\]\.concat/.test(app),
+  '接大模型时也用本地识别结果给出场景提示（只多一行，不重）');
+report(/buildReviewReply/.test(engineSrc) && /'say'/.test(engineSrc), '本地复盘回复用"朋友式"段落 + 场景判断 + 解释');
+report(htmlIds.has('reviewChat') && htmlIds.has('reviewInput') && htmlIds.has('reviewSend'), '复盘页是聊天界面（有输入框和发送）');
+report(!htmlIds.has('rvScene') && !htmlIds.has('rvLevel'), '复盘的填表字段已删除');
+report(/sendReview/.test(app) && /mode: 'review'/.test(app), '前端用 review 模式发消息');
+report(/case 'say'/.test(app), '渲染器支持 say 段落（聊天风格）');
+report(/E\.buildReviewReply/.test(app), '没接大模型时也能像朋友一样回（本地兜底）');
 
 console.log('\n== 2b. 社交画像测试 ==');
 const assess = require('./assessment.js');

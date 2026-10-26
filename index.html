@@ -60,51 +60,24 @@
     <!-- ============ 社交后复盘 ============ -->
     <section class="panel" id="panel-review">
       <div class="card">
-        <h2>结构化复盘</h2>
-        <p class="hint">把"事后反刍"变成一条可复用的经验。填写时间约 1 分钟。</p>
+        <h2>想说说刚才那件事吗</h2>
+        <p class="hint">不用填表。就当跟朋友讲一遍——它会听着，也会帮你把场景和压力来源讲清楚，最后给你一句下次能用的话。说完了，它会自动记一笔到成长档案。</p>
       </div>
-      <form class="card" id="reviewForm">
-        <div class="field">
-          <label for="rvScene">场景</label>
-          <select id="rvScene"></select>
-        </div>
-        <div class="field">
-          <label for="rvLevel">当时的焦虑程度</label>
-          <div class="slider-row">
-            <input type="range" id="rvLevel" min="1" max="5" step="1" value="3">
-            <span class="lv-badge" id="rvLevelBadge">3/5 明显紧张</span>
-          </div>
-        </div>
-        <div class="field">
-          <label>触发点（可多选）</label>
-          <div class="chips" id="rvTriggers"></div>
-        </div>
-        <div class="field">
-          <label for="rvAction">我做了什么</label>
-          <textarea id="rvAction" placeholder="例：先说了一句兜底的话，然后把话题交给对方"></textarea>
-          <button class="mic-btn inline" id="micAction" type="button">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3z"/><path d="M18.5 11a.9.9 0 0 0-1.8 0 4.7 4.7 0 0 1-9.4 0 .9.9 0 0 0-1.8 0 6.5 6.5 0 0 0 5.6 6.42V20H9.4a.9.9 0 0 0 0 1.8h5.2a.9.9 0 0 0 0-1.8h-1.7v-2.58A6.5 6.5 0 0 0 18.5 11z"/></svg>
-            <span>语音输入</span>
+
+      <div class="chat" id="reviewChat" aria-live="polite"></div>
+
+      <div class="composer">
+        <div class="suggest-cap">想到什么说什么，一两句就行 ↓</div>
+        <div class="suggest" id="reviewSuggest"></div>
+        <div class="composer-inner">
+          <textarea id="reviewInput" rows="1" placeholder="例：今天聚餐我基本没说话，回来一直在想是不是很怪"></textarea>
+          <button class="mic-btn" id="micReview" type="button" title="语音输入（点一下开始，再点一下结束）" aria-label="语音输入">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3z"/><path d="M18.5 11a.9.9 0 0 0-1.8 0 4.7 4.7 0 0 1-9.4 0 .9.9 0 0 0-1.8 0 6.5 6.5 0 0 0 5.6 6.42V20H9.4a.9.9 0 0 0 0 1.8h5.2a.9.9 0 0 0 0-1.8h-1.7v-2.58A6.5 6.5 0 0 0 18.5 11z"/></svg>
           </button>
+          <button class="btn" id="reviewSend">发送</button>
         </div>
-        <div class="field">
-          <label>效果</label>
-          <div class="chips" id="rvEffect"></div>
-        </div>
-        <div class="field">
-          <label for="rvNext">下次想换的一个小动作（只写一个）</label>
-          <textarea id="rvNext" placeholder="例：提前写好饭后离场的理由"></textarea>
-          <button class="mic-btn inline" id="micNext" type="button">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3z"/><path d="M18.5 11a.9.9 0 0 0-1.8 0 4.7 4.7 0 0 1-9.4 0 .9.9 0 0 0-1.8 0 6.5 6.5 0 0 0 5.6 6.42V20H9.4a.9.9 0 0 0 0 1.8h5.2a.9.9 0 0 0 0-1.8h-1.7v-2.58A6.5 6.5 0 0 0 18.5 11z"/></svg>
-            <span>语音输入</span>
-          </button>
-        </div>
-        <div class="row-between">
-          <button class="btn" type="submit">完成复盘</button>
-          <button class="btn ghost small" type="button" id="rvDemo">填一份示例</button>
-        </div>
-      </form>
-      <div id="reviewResult"></div>
+      </div>
+      <p class="footer-note">说的是当时发生了什么、你怎么想的 · 不用组织语言</p>
     </section>
 
     <!-- ============ 社交画像测试 ============ -->

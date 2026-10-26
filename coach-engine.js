@@ -567,33 +567,17 @@
       }
     }
 
+    /* 产品决策（用户要求）：准备页**只给话术**——不再给场景判断、解释、呼吸、清单。
+       但保留一行极轻量的场景提示（认错了能一眼看出来并切换），
+       场景判断与「换个角度解释」放在复盘模块（见 buildReviewReply）。 */
     var blocks = [];
-    blocks.push({ type: 'empathy', text: empathyLine(emotion, scene) });
     blocks.push({
-      type: 'analysis',
-      title: guess ? '我先按最接近的场景来准备' : '我听到的场景',
+      type: 'sceneHint',
       scene: scene.name,
-      guess: guess,
       level: pressure.level,
       levelLabel: pressure.label,
-      factors: pressure.factors,
-      emotionLabels: emotion.labels.map(function (l) { return l.label; }),
-      note: pressure.tendencyNote,
-      selfCheck: selfCheck,
+      guess: guess,
       alternatives: found.slice(1).map(function (f) { return f.scene.name; })
-    });
-    blocks.push({
-      type: 'reframe',
-      title: '30 秒：先重新解释这份紧张',
-      // 原来这里有一行"报告里受访者最认可的方式"，用户反馈"这行字出现的必要性在于？"——去掉
-      lines: scene.reframe
-    });
-    blocks.push({
-      type: 'breath',
-      title: '要一起做 30 秒呼吸吗',
-      pattern: { inhale: 4, hold: 2, exhale: 6 },
-      seconds: 30,
-      text: '吸 4 秒，停 2 秒，呼 6 秒。呼气比吸气长，身体会跟着慢下来。'
     });
     blocks.push({
       type: 'script',
@@ -606,13 +590,71 @@
         { label: '离场兜底', items: scene.scripts.exit || [] }
       ].filter(function (g) { return g.items && g.items.length > 0; })
     });
+    return {
+      scene: scene, matched: matched, pressure: pressure, emotion: emotion,
+      factors: pressure.factors, selfCheck: selfCheck, guess: guess,
+      blocks: blocks, crisis: false
+    };
+  }
+
+  /**
+   * 复盘模块的本地回复（没接大模型 / 未登录时用）：
+   * 像朋友那样先接住情绪，然后把「场景判断」和「换个角度解释」讲清楚。
+   */
+  function buildReviewReply(input, profile) {
+    var text = String(input || '');
+    if (safetyCheck(text)) return { blocks: [CRISIS_BLOCK], crisis: true };
+    var found = detectScenes(text, 3);
+    var scene = found.length ? found[0].scene : getScene('party-strangers');
+    var guess = !found.length;
+    var emotion = detectEmotions(text);
+    var pressure = estimatePressure(scene.id, text, profile);
+    var blocks = [];
+    blocks.push({ type: 'say', text: empathyLine(emotion, scene) });
     blocks.push({
-      type: 'checklist',
-      title: '如果还有 3 分钟',
-      items: scene.checklist,
-      hint: '不用全部做完，挑一件做就够了；准备时间控制在 3 分钟以内。'
+      type: 'analysis',
+      title: guess ? '听起来最接近的是' : '这像是',
+      scene: scene.name,
+      guess: guess,
+      level: pressure.level,
+      levelLabel: pressure.label,
+      factors: pressure.factors,
+      emotionLabels: emotion.labels.map(function (l) { return l.label; }),
+      note: pressure.tendencyNote,
+      alternatives: found.slice(1).map(function (f) { return f.scene.name; })
     });
-    return { scene: scene, matched: matched, pressure: pressure, emotion: emotion, blocks: blocks, crisis: false };
+    blocks.push({ type: 'reframe', title: '换个说法看这件事', lines: scene.reframe });
+    return {
+      scene: scene, matched: found.length ? { id: scene.id, name: scene.name, keywords: scene.aliases.filter(function (a) { return norm(text).indexOf(norm(a)) >= 0; }) } : null,
+      pressure: pressure, emotion: emotion, blocks: blocks, crisis: false
+    };
+  }
+
+  /**
+   * 从一段自由倾诉里粗略抽出结构化复盘（离线兜底用；接了大模型则由模型抽取）。
+   * 只用于"记一笔"，不追求精确；抽不出的字段留空。
+   */
+  function guessReview(input) {
+    var text = String(input || '');
+    var found = detectScenes(text, 3);
+    var scene = found.length ? found[0].scene : null;
+    var pressure = estimatePressure(scene ? scene.id : 'party-strangers', text, null);
+    var triggers = [];
+    if (/人多|好几个|一堆人/.test(text)) triggers.push('人多');
+    if (/陌生人|不熟|不认识/.test(text)) triggers.push('都是陌生人');
+    if (/当众|上台|发言|被点名/.test(text)) triggers.push('要当众说话');
+    if (/说错|讲错|冒犯|说不好/.test(text)) triggers.push('怕说错');
+    var effect = /还行|不错|顺利|好多了|有效/.test(text) ? 'good'
+      : /没用|更糟|失败了|很难受/.test(text) ? 'bad' : 'ok';
+    return {
+      sceneId: scene ? scene.id : 'party-strangers',
+      sceneName: scene ? scene.name : '',
+      level: pressure.level,
+      triggers: triggers,
+      action: '',
+      effect: effect,
+      next: ''
+    };
   }
 
   /* ------------------------------------------------------------------ *
@@ -686,7 +728,7 @@
     var record = {
       at: i.at || new Date().toISOString(),
       sceneId: i.sceneId || 'party-strangers',
-      sceneName: (getScene(i.sceneId) || {}).name || '未分类场景',
+      sceneName: String(i.sceneName || '').trim() || (getScene(i.sceneId) || {}).name || '未分类场景',
       level: Math.max(1, Math.min(5, parseInt(i.level, 10) || 3)),
       triggers: (i.triggers || []).slice(0, 6),
       action: String(i.action || '').slice(0, 300),
@@ -914,6 +956,8 @@
     estimatePressure: estimatePressure,
     detectEmotions: detectEmotions,
     buildPrepReply: buildPrepReply,
+    buildReviewReply: buildReviewReply,
+    guessReview: guessReview,
     buildEmergencyReply: buildEmergencyReply,
     buildReview: buildReview,
     createProfile: createProfile,
