@@ -18,7 +18,7 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
-  var VERSION = 1;
+  var VERSION = 3;   // 3：题库 96 题（8 维 × 12），自适应 48–56
 
   /* ------------------------------------------------------------------ *
    * 一、八个维度
@@ -44,6 +44,13 @@
     { id: 'i3', dim: 'initiating', reverse: false, text: '需要给陌生机构打电话时，我会先写好要说的话再打。' },
     { id: 'i4', dim: 'initiating', reverse: true, text: '走进一个几乎都是陌生人的房间，我会先找个角落待着。' },
     { id: 'i5', dim: 'initiating', reverse: false, text: '我能在几秒内想出一句打破沉默的开场白。' },
+    { id: 'i6', dim: 'initiating', reverse: false, text: '在食堂遇到不太熟的同学，我能自然地打个招呼。' },
+    { id: 'i7', dim: 'initiating', reverse: true, text: '活动室还在等人时，我宁愿站在外面，也不先进去寒暄。' },
+    { id: 'i8', dim: 'initiating', reverse: false, text: '需要加同学微信时，我能把「为什么加你」说得清楚。' },
+    { id: 'i9', dim: 'initiating', reverse: false, text: '需要向邻座同学借一支笔，我能直接开口。' },
+    { id: 'i10', dim: 'initiating', reverse: true, text: '群里需要有人去问老师一件事时，我会等别人先开口。' },
+    { id: 'i11', dim: 'initiating', reverse: false, text: '在社团招新摊位前，我能主动问一句「你们平时做什么」。' },
+    { id: 'i12', dim: 'initiating', reverse: false, text: '和刚认识的人分别时，我能自然地说「加个微信吧」。' },
 
     // 小范围寒暄
     { id: 's1', dim: 'smalltalk', reverse: false, text: '和不熟的同学一起吃饭，我能聊满一顿饭而不觉得尴尬。' },
@@ -51,6 +58,13 @@
     { id: 's3', dim: 'smalltalk', reverse: false, text: '我会用现场可见的东西（菜、活动、教室）自然起话题。' },
     { id: 's4', dim: 'smalltalk', reverse: true, text: '和不太熟的人待在一起，安静几秒我会觉得很难熬。' },
     { id: 's5', dim: 'smalltalk', reverse: false, text: '和室友、邻居聊两句日常，对我来说很轻松。' },
+    { id: 's6', dim: 'smalltalk', reverse: false, text: '在电梯里遇到同班同学，我能聊上一两句。' },
+    { id: 's7', dim: 'smalltalk', reverse: true, text: '和同学两个人一起走路时，我常常一路无话。' },
+    { id: 's8', dim: 'smalltalk', reverse: false, text: '对方说「最近好忙」时，我能顺着问出具体在忙什么。' },
+    { id: 's9', dim: 'smalltalk', reverse: false, text: '在食堂和同学拼桌，我能从「今天这个菜还行」聊下去。' },
+    { id: 's10', dim: 'smalltalk', reverse: true, text: '排队时遇到熟人，我会假装没看见或者低头看手机。' },
+    { id: 's11', dim: 'smalltalk', reverse: false, text: '对方说了一件事，我能追问一个具体细节。' },
+    { id: 's12', dim: 'smalltalk', reverse: false, text: '聊天出现三秒安静时，我能接上一句不尴尬的话。' },
 
     // 群体融入
     { id: 'g1', dim: 'group', reverse: false, text: '参加大多数人不认识的聚会时，我能主动认识一两个人。' },
@@ -58,6 +72,13 @@
     { id: 'g3', dim: 'group', reverse: false, text: '话题转到我完全不熟悉的领域时，我能问出让对方继续讲的问题。' },
     { id: 'g4', dim: 'group', reverse: true, text: '人多的场合我会尽量少说话，避免被注意到。' },
     { id: 'g5', dim: 'group', reverse: false, text: '我能在一个聚会里自然地从一组人换到另一组人。' },
+    { id: 'g6', dim: 'group', reverse: false, text: '小组讨论里，我能把话头接过来，说清自己那部分。' },
+    { id: 'g7', dim: 'group', reverse: true, text: '社团破冰游戏轮到我时，我更希望自己被跳过。' },
+    { id: 'g8', dim: 'group', reverse: false, text: '饭桌上大家互相介绍时，我能记住一两个名字并再叫出来。' },
+    { id: 'g9', dim: 'group', reverse: false, text: '班级群里有人说「有人一起吗」，我能第一个回「我去」。' },
+    { id: 'g10', dim: 'group', reverse: true, text: '小组分工时，我宁可多做事，也不主动说自己想做什么。' },
+    { id: 'g11', dim: 'group', reverse: false, text: '社团例会上，我能就一个议题说两句自己的想法。' },
+    { id: 'g12', dim: 'group', reverse: false, text: '聚会里有人聊我不懂的话题，我能问一句「这个是怎么玩的」。' },
 
     // 当众表达
     { id: 'p1', dim: 'publicspeaking', reverse: false, text: '需要在课堂上做展示时，我能把开场的三句话讲清楚。' },
@@ -65,6 +86,13 @@
     { id: 'p3', dim: 'publicspeaking', reverse: false, text: '发言前我会先写下要点，而不是全靠临场组织语言。' },
     { id: 'p4', dim: 'publicspeaking', reverse: true, text: '在会议上想说点什么，我常常等到最后也没说出口。' },
     { id: 'p5', dim: 'publicspeaking', reverse: false, text: '自我介绍时，我能说出一件具体的事让别人记住我。' },
+    { id: 'p6', dim: 'publicspeaking', reverse: false, text: '上台前我会练站姿和开口的第一句，而不是把全文背下来。' },
+    { id: 'p7', dim: 'publicspeaking', reverse: true, text: '在全班面前发言时，我会一直盯着稿子、不敢抬头。' },
+    { id: 'p8', dim: 'publicspeaking', reverse: false, text: '展示结束被提问时，我能先说一句「这个问题我分两点讲」。' },
+    { id: 'p9', dim: 'publicspeaking', reverse: false, text: '做课堂展示时，我能把时间控制在要求之内。' },
+    { id: 'p10', dim: 'publicspeaking', reverse: true, text: '一想到要上台，我会提前几天开始睡不好。' },
+    { id: 'p11', dim: 'publicspeaking', reverse: false, text: '讲到不熟的部分，我能先说「这块我查得不多，但我理解是……」。' },
+    { id: 'p12', dim: 'publicspeaking', reverse: false, text: '被老师当堂点名回答，我能先复述问题再作答。' },
 
     // 权威沟通
     { id: 'a1', dim: 'authority', reverse: false, text: '遇到不懂的问题，我会主动去问老师或学长。' },
@@ -72,6 +100,13 @@
     { id: 'a3', dim: 'authority', reverse: false, text: '我能把请求说得简短明确：我是谁、要什么、需要对方做什么。' },
     { id: 'a4', dim: 'authority', reverse: true, text: '我觉得自己的问题太浅，不好意思去问。' },
     { id: 'a5', dim: 'authority', reverse: false, text: '面试中答不上来时，我能坦然承认并给出自己的思路。' },
+    { id: 'a6', dim: 'authority', reverse: false, text: '给老师发邮件时，我能写清标题、事由和希望回复的时间。' },
+    { id: 'a7', dim: 'authority', reverse: true, text: '学长学姐语气一严肃，我就会把想说的话咽回去。' },
+    { id: 'a8', dim: 'authority', reverse: false, text: '面试最后我可以主动提问，比如问这个岗位日常做什么。' },
+    { id: 'a9', dim: 'authority', reverse: false, text: '我能走进办公室，当面向老师请教一个问题。' },
+    { id: 'a10', dim: 'authority', reverse: true, text: '老师语气一冷，我就会觉得是自己做错了什么。' },
+    { id: 'a11', dim: 'authority', reverse: false, text: '需要请老师签字或写推荐时，我能把材料准备齐再开口。' },
+    { id: 'a12', dim: 'authority', reverse: false, text: '和辅导员谈自己的困难时，我能说清具体需要什么帮助。' },
 
     // 临场应变
     { id: 'm1', dim: 'improvising', reverse: false, text: '说话卡住时，我能用一句过渡话给自己争取时间。' },
@@ -79,6 +114,13 @@
     { id: 'm3', dim: 'improvising', reverse: false, text: '需要离开时，我能自然地找个理由从容退场。' },
     { id: 'm4', dim: 'improvising', reverse: true, text: '说错话之后，我会当场僵住、很难继续下去。' },
     { id: 'm5', dim: 'improvising', reverse: false, text: '话题不合适时，我能把它转到更轻松的方向。' },
+    { id: 'm6', dim: 'improvising', reverse: false, text: '被要求临时补充几句时，我能先讲自己记得住的部分。' },
+    { id: 'm7', dim: 'improvising', reverse: true, text: '被问到一个没准备的问题，我会结巴到说不下去。' },
+    { id: 'm8', dim: 'improvising', reverse: false, text: '发现自己讲错了，我能当场补一句改过来。' },
+    { id: 'm9', dim: 'improvising', reverse: false, text: '临时被推上台说两句，我能先说「我准备得不多」再讲要点。' },
+    { id: 'm10', dim: 'improvising', reverse: true, text: '别人开玩笑点到我时，我会脸红到说不出话。' },
+    { id: 'm11', dim: 'improvising', reverse: false, text: '讨论跑题时，我能把话题拉回来。' },
+    { id: 'm12', dim: 'improvising', reverse: false, text: '发现自己说错了人名，我能自然改口。' },
 
     // 情绪恢复
     { id: 'r1', dim: 'recovery', reverse: false, text: '心跳加速、手心出汗时，我能在几分钟内平复下来。' },
@@ -86,13 +128,26 @@
     { id: 'r3', dim: 'recovery', reverse: false, text: '紧张时我能用呼吸或自我对话让自己稳下来。' },
     { id: 'r4', dim: 'recovery', reverse: true, text: '一次不顺利的社交会影响我接下来一整天的心情。' },
     { id: 'r5', dim: 'recovery', reverse: false, text: '我能把"心跳快"理解成身体在准备，而不是我不行。' },
-
+    { id: 'r6', dim: 'recovery', reverse: false, text: '上台前心跳很快时，我知道等一分钟它会自己降下来。' },
+    { id: 'r7', dim: 'recovery', reverse: true, text: '发出去的消息对方没回，我会反复点开对话框看。' },
+    { id: 'r8', dim: 'recovery', reverse: false, text: '一次冷场之后，我能在当天把注意力放回别的事情上。' },
+    { id: 'r9', dim: 'recovery', reverse: false, text: '一次发言没表现好，我第二天还能正常去上课。' },
+    { id: 'r10', dim: 'recovery', reverse: true, text: '反复回想自己说过的蠢话，会占用我很多时间。' },
+    { id: 'r11', dim: 'recovery', reverse: false, text: '紧张过后，我会做点别的事把注意力移开。' },
+    { id: 'r12', dim: 'recovery', reverse: false, text: '被人指出问题，我能区分「这件事没做好」和「我这个人不行」。' },
     // 社交续航
     { id: 't1', dim: 'stamina', reverse: false, text: '连续参加几场活动后，我知道该怎么给自己留恢复时间。' },
     { id: 't2', dim: 'stamina', reverse: true, text: '一整天的课加上晚间活动，会让我彻底不想说话。' },
     { id: 't3', dim: 'stamina', reverse: false, text: '我能拒绝不想参加的社交活动，而不太感到内疚。' },
     { id: 't4', dim: 'stamina', reverse: true, text: '社交之后我需要很长时间才能恢复精力。' },
-    { id: 't5', dim: 'stamina', reverse: false, text: '我会提前安排社交和独处的时间比例。' }
+    { id: 't5', dim: 'stamina', reverse: false, text: '我会提前安排社交和独处的时间比例。' },
+    { id: 't6', dim: 'stamina', reverse: false, text: '连着两天有活动，我会提前留出半天完全独处。' },
+    { id: 't7', dim: 'stamina', reverse: true, text: '社交排得很密的那几周，我会失眠或者特别烦躁。' },
+    { id: 't8', dim: 'stamina', reverse: false, text: '我大概清楚自己一周能承受几场社交。' },
+    { id: 't9', dim: 'stamina', reverse: false, text: '我知道自己每周安排几场社交最合适。' },
+    { id: 't10', dim: 'stamina', reverse: true, text: '连续几天有集体活动，我会开始找理由请假。' },
+    { id: 't11', dim: 'stamina', reverse: false, text: '社交之后，我会给自己留一段不说话的时间。' },
+    { id: 't12', dim: 'stamina', reverse: false, text: '我能判断今天还有没有余力再去一个聚会。' },
   ];
 
   var LIKERT = [
@@ -348,9 +403,10 @@
    * ------------------------------------------------------------------ */
   var ADAPTIVE = {
     block: 4,          // 每屏几题
-    minPerDim: 3,      // 每维至少几题
-    minTotal: 24,      // 最少总题数
-    maxTotal: 32,      // 最多总题数
+    minPerDim: 6,      // 每维至少几题（8 维 × 6 = 48，这是我们承诺的下限）
+    maxPerDim: 7,      // 每维最多几题（模糊的维度可以多问一道）
+    minTotal: 48,      // 最少总题数
+    maxTotal: 56,      // 最多总题数
     midLow: 2.4,       // 中间带下界（用于挑反向题）
     midHigh: 3.6
   };
@@ -400,13 +456,24 @@
   }
 
   /** 该不该停 */
+  /** 该维均值是否仍卡在中间带（说明答案分辨不出高低，值得再问） */
+  function isUnclear(stat) {
+    return stat && stat.mean !== null &&
+      stat.mean >= ADAPTIVE.midLow && stat.mean <= ADAPTIVE.midHigh &&
+      stat.n < ADAPTIVE.maxPerDim;
+  }
+
   function shouldStop(answers, asked) {
     var a = answers || {};
     var done = answeredCount(a);
     if (done >= ADAPTIVE.maxTotal) return true;
     var stats = dimStats(a);
     var allEnough = DIMENSIONS.every(function (d) { return stats[d.key].n >= ADAPTIVE.minPerDim; });
-    if (allEnough && done >= ADAPTIVE.minTotal) return true;
+    if (allEnough && done >= ADAPTIVE.minTotal) {
+      // 已经到 48 题：只有当还有维度「说不清」且没到上限时，才继续挖
+      var unclear = DIMENSIONS.filter(function (d) { return isUnclear(stats[d.key]); });
+      if (!unclear.length || done >= ADAPTIVE.maxTotal) return true;
+    }
     // 题库里没有可问的了（理论上不会发生）
     var left = ITEMS.filter(function (it) { return !(typeof a[it.id] === 'number'); });
     return left.length === 0;
@@ -425,14 +492,16 @@
 
     var stats = dimStats(a);
     var order = DIMENSIONS.map(function (d) {
-      var s = stats[d.key];
-      // 缺题最多的优先；同样缺题时，均值越低（越吃力）越优先；再同则看均值离中间带多近
-      var need = Math.max(0, ADAPTIVE.minPerDim - s.n);
-      var middle = s.mean === null ? 3 : Math.abs(s.mean - 3);
-      return { key: d.key, need: need, mean: s.mean === null ? 3 : s.mean, middle: middle };
+      var st = stats[d.key];
+      var need = Math.max(0, ADAPTIVE.minPerDim - st.n);
+      var mean = st.mean === null ? 3 : st.mean;
+      var middle = Math.abs(mean - 3);
+      return { key: d.key, need: need, mean: mean, middle: middle,
+               unclear: (need === 0 && isUnclear(st)) ? 1 : 0 };
     }).sort(function (x, y) {
-      if (y.need !== x.need) return y.need - x.need;
-      if (x.mean !== y.mean) return x.mean - y.mean;
+      if (y.need !== x.need) return y.need - x.need;      // 1. 缺题的先补
+      if (y.unclear !== x.unclear) return y.unclear - x.unclear;  // 2. 说不清的优先
+      if (x.mean !== y.mean) return x.mean - y.mean;      // 3. 偏弱的先问
       return x.middle - y.middle;
     });
 

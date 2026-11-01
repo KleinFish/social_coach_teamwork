@@ -940,9 +940,9 @@
         var need = Assess.DIMENSIONS.map(function (d) { return st.perDim[d.key]; })
           .sort(function (x, y) { return x.n - y.n; })[0];
         why.textContent = stop
-          ? '差不多了——八个维度都至少问到了 3 题，再问下去信息也不会多多少。'
+          ? '差不多了——八个维度都至少问到了 6 题，再问下去信息也不会多多少。'
           : (need && need.n < Assess.ADAPTIVE.minPerDim
-            ? '接下来会多问几个你还没答过的维度，好让画像别一边厚一边薄。'
+            ? '接下来会多问几道你还没答过的题，好让画像别一边厚一边薄。'
             : '这几题会挑你答案落在中间、最拿不准的地方问。');
       }
       prev.classList.add('hidden');          // 会挑题的版本不回头，避免同一题被重复计分
@@ -957,7 +957,7 @@
     var answeredAll = Assess.ITEMS.every(function (it) { return quiz.answers[it.id]; });
     $('#testBar').style.width = Math.round(((quiz.page + (answeredOnPage ? 1 : 0.5)) / pages) * 100) + '%';
     $('#testCount').textContent = '第 ' + (quiz.page + 1) + ' / ' + pages + ' 页 · 已答 ' + answered + ' / ' + Assess.ITEMS.length;
-    if (why) why.textContent = '完整版会把 40 道题都问一遍，适合隔一段时间重测做对比。';
+    if (why) why.textContent = '完整版会把 96 道题都问一遍，适合隔一段时间重测做对比。';
     prev.classList.remove('hidden');
     prev.disabled = quiz.page === 0;
     next.textContent = lastPage ? '提交并生成画像' : '下一页';

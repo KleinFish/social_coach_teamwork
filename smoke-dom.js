@@ -114,7 +114,7 @@ ok('登录表单可见（等有网时可用）', !$('cloudForm').classList.conta
 ok('登录区块保持隐藏', $('cloudSignedIn').classList.contains('hidden'));
 ok('大模型标签回落到本地引擎', /未配置|离线/.test($('llmPill').textContent), $('llmPill').textContent);
 
-section('社交画像测试（完整版 40 题全流程）');
+section('社交画像测试（完整版 96 题全流程）');
 ok('初始显示测试说明', !$('testIntro').classList.contains('hidden') && $('testQuiz').classList.contains('hidden'));
 ok('入口有「快速版」和「完整版」两个模式',
   !!$('testStartAdaptive') && !!$('testStartFull'));
@@ -464,7 +464,7 @@ console.log('\n【场景九】自适应测评');
     $q('testPrev').classList.contains('hidden'));
 
   let rounds = 0;
-  while (rounds < 12 && !$q('testQuiz').classList.contains('hidden')) {
+  while (rounds < 20 && !$q('testQuiz').classList.contains('hidden')) {
     const items = $q('testQuestions').querySelectorAll('.q-item');
     if (!items.length) break;
     items.forEach((node) => { node.querySelectorAll('.q-opt')[4].click(); });   // 全选「完全符合」
@@ -478,7 +478,7 @@ console.log('\n【场景九】自适应测评');
     !!(qProf.assessment && qProf.assessment.dimensions &&
        Object.keys(qProf.assessment.dimensions).length === 8),
     JSON.stringify(qProf.assessment && Object.keys(qProf.assessment.dimensions || {})));
-  ok('实际题数在 24–32 之间', qProf.assessment.answered >= 24 && qProf.assessment.answered <= 32,
+  ok('实际题数在 48–56 之间', qProf.assessment.answered >= 48 && qProf.assessment.answered <= 56,
     String(qProf.assessment && qProf.assessment.answered));
   ok('比完整版更省题', qProf.assessment.answered < Assess.ITEMS.length, String(qProf.assessment.answered));
   ok('结果区渲染出来了', $q('testResult').childNodes.length >= 3);

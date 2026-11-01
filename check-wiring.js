@@ -167,8 +167,9 @@ console.log('\n== 2i. 自适应测评 + 画像喂给大模型 ==');
 const assessSrc2 = fs.readFileSync(path.join(dir, 'assessment.js'), 'utf8');
 report(/adaptiveStart/.test(assessSrc2) && /adaptiveNext/.test(assessSrc2) && /shouldStop/.test(assessSrc2),
   '量表实现了自适应选题（分层 / 序贯分配）');
-report(/minPerDim:\s*3/.test(assessSrc2) && /maxTotal:\s*32/.test(assessSrc2),
-  '自适应有明确的量化标准（每维 ≥3 题、总量 ≤32）');
+report(/minPerDim:\s*6/.test(assessSrc2) && /maxTotal:\s*56/.test(assessSrc2),
+  '自适应有明确的量化标准（每维 ≥6 题、总量 48–56）');
+report((assessSrc2.match(/dim: '/g) || []).length >= 80, '题库扩到 80 题以上（每维 12 题）');
 report(/promptBrief/.test(assessSrc2), '画像能压成一句给模型看的摘要');
 report(/midLow:\s*2\.4/.test(assessSrc2), '中间值会优先补反向题（防一路点同意）');
 report(htmlIds.has('testStartAdaptive') && htmlIds.has('testStartFull'),
@@ -185,9 +186,9 @@ report(/没听到，再说一次/.test(app) && /等会儿再试/.test(app), 'toa
 console.log('\n== 2b. 社交画像测试 ==');
 const assess = require('./assessment.js');
 const assessSrc = fs.readFileSync(path.join(dir, 'assessment.js'), 'utf8');
-report(assess.itemCount() <= 48, `题库 ${assess.itemCount()} 题（上限 48）`);
-report(assess.DIMENSIONS.length === 8 && assess.DIMENSIONS.every(d => assess.ITEMS.filter(i => i.dim === d.key).length === 5),
-  '8 个维度 × 5 题，结构完整');
+report(assess.itemCount() >= 90, `题库 ${assess.itemCount()} 题（8 维 × 12）`);
+report(assess.DIMENSIONS.length === 8 && assess.DIMENSIONS.every(d => assess.ITEMS.filter(i => i.dim === d.key).length === 12),
+  '8 个维度 × 12 题，结构完整');
 report(assess.DIMENSIONS.every(d => assess.ITEMS.filter(i => i.dim === d.key).some(i => i.reverse)),
   '每个维度都含反向计分题');
 report(/SocialAssessment/.test(app), 'app.js 已接入画像模块');

@@ -20,17 +20,17 @@ function answersAt(level) {
 }
 
 section('量表结构');
-ok('题目数量不超过 48', A.itemCount() <= 48, String(A.itemCount()));
-ok('题目数量正好 40（8 维 × 5 题）', A.itemCount() === 40);
+ok('题目数量不少于 90（题库已扩容）', A.itemCount() >= 90, String(A.itemCount()));
+ok('题目数量正好 96（8 维 × 12 题）', A.itemCount() === 96, String(A.itemCount()));
 ok('维度数量为 8', A.DIMENSIONS.length === 8);
 ok('题目 id 唯一', new Set(A.ITEMS.map((i) => i.id)).size === A.ITEMS.length);
 let perDimOk = true, reverseOk = true;
 A.DIMENSIONS.forEach((d) => {
   const items = A.ITEMS.filter((i) => i.dim === d.key);
-  if (items.length !== 5) perDimOk = false;
+  if (items.length !== 12) perDimOk = false;
   if (!items.some((i) => i.reverse)) reverseOk = false;
 });
-ok('每个维度恰好 5 题', perDimOk);
+ok('每个维度恰好 12 题', perDimOk);
 ok('每个维度都含反向计分题', reverseOk);
 ok('每题都绑定到已定义的维度', A.ITEMS.every((i) => A.DIMENSIONS.some((d) => d.key === i.dim)));
 ok('自评选项为 5 级', A.LIKERT.length === 5 && A.LIKERT[0].value === 1 && A.LIKERT[4].value === 5);
@@ -148,10 +148,10 @@ section('自适应选题');
   }
   const done = Object.keys(answers).length;
   ok('答完自动停止', A.shouldStop(answers, asked));
-  ok('总题数落在 24–32 之间', done >= 24 && done <= A.ADAPTIVE.maxTotal, String(done));
-  ok('比完整版 40 题更短', done < A.ITEMS.length, String(done));
+  ok('总题数落在 48–56 之间', done >= 48 && done <= A.ADAPTIVE.maxTotal, String(done));
+  ok('比完整版 96 题更短，但不少于 48 题', done < A.ITEMS.length && done >= 48, String(done));
   const st = A.dimStats(answers);
-  ok('停止时每个维度至少 3 题',
+  ok('停止时每个维度至少 6 题',
     A.DIMENSIONS.every((d) => st[d.key].n >= A.ADAPTIVE.minPerDim),
     A.DIMENSIONS.map((d) => st[d.key].n).join(','));
   ok('自适应结果也能出完整画像',
