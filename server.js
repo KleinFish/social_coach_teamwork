@@ -21,6 +21,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const Engine = require('./coach-engine.js');
+const Assess = require('./assessment.js');
 
 const ROOT = __dirname;
 function envInt(v, dflt) { const n = parseInt(v, 10); return Number.isFinite(n) ? n : dflt; }
@@ -487,7 +488,16 @@ const LLM_REVIEW_PROMPT = [
   '① 帮他说清这是哪类场景、压力到底来自哪（人多？怕说错？容错空间小？）',
   '② 帮他把这件事换个角度解释一下：不是他这个人有问题，而是这类场景本来就难。',
   '',
-  '【最后给一句】下次遇到同类情况可以直接用的话，一句就够。',
+  '【反刍的三个陷阱，必须避开】（事后反刍会加重社交焦虑，我们要打断它）',
+  '- 陷阱一：跟他一起做**抽象自我评价**（"我是不是很失败""我这个人就是不行"）。',
+  '  遇到这种话，先请他说具体一点："能不能说一下当时具体发生了什么、你说了哪一句？"',
+  '  把注意力从"我是怎样的人"移到"那一分钟发生了什么" —— 具体的事可以说清，抽象的评价说不清。',
+  '- 陷阱二：跟他一起推测别人的心理（"他们肯定觉得我……"）。这类猜测无法验证，只会更焦虑。',
+  '  只谈**能观察到的行为**：谁说了什么、谁做了什么、当时有几个人。',
+  '- 陷阱三：把整段经历重新讲一遍，让他又回放一次。只挑一个具体片段说透，其余跳过。',
+  '',
+  '【最后给一个 if-then 的下一步】（实施意向比"我要更自信"更管用）',
+  '格式：如果（具体的触发情境），那么我就（一个 5 秒内能做的小动作）。一句就够，不要超过 40 字。',
   '',
   '【禁止】"你应该""你必须"、呼吸放松、心理诊断或医学建议、把用户的话重复一遍、解释你在做什么。',
   '',
@@ -699,13 +709,55 @@ function createApp(options) {
     };
   }
 
+
+  /** 把画像压成给模型看的摘要：只讲人话，不给分数细节，也不让它当测评报告念 */
+  function profileBrief(profile) {
+    if (!profile) return '';
+    const bits = [];
+    try {
+      const brief = Assess.promptBrief(profile.assessment);
+      if (brief) bits.push(brief);
+    } catch (e) { /* 画像缺字段就不提 */ }
+    try {
+      const dims = profile.assessment && profile.assessment.dimensions;
+      if (dims) {
+        const preds = Assess.predictScenes(dims, Engine.SCENES) || [];
+        const hard = preds.filter((p) => p && p.difficulty >= 3.6).slice(0, 2);
+        if (hard.length) {
+          bits.push('按这份画像最容易卡住的是「' + hard.map((p) => p.name + ' ' + p.difficulty.toFixed(1) + '/5').join('」「') + '」');
+        }
+      }
+    } catch (e) { /* 预测失败就跳过 */ }
+    if (profile.tendency === 'i') bits.push('本人偏内向');
+    if (profile.tendency === 'e') bits.push('本人偏外向');
+    return bits.join('；');
+  }
+
   async function callLLM(text, tendency, opts) {
     const o = opts || {};
     const mode = o.mode === 'review' ? 'review' : 'prep';
     const catalog = await sceneCatalog();
     const tpl = mode === 'review' ? LLM_REVIEW_PROMPT : LLM_PREP_PROMPT;
     const system = tpl.replace('${SCENE_LIST}', catalog.names.join('、'));
+    const profileNote = profileBrief(o.profile);
     const messages = [{ role: 'system', content: system }];
+    if (profileNote) {
+      messages[0].content += '\n\n【关于这份画像怎么用】\n' +
+        '用户做过自评：' + profileNote + '。\n' +
+        '- 只用来调整你说的东西，**不要在回复里提分数、不要念画像、不要说"根据你的测评"**。\n' +
+        '- 如果这正是他偏吃力的场景：话术更短、更具体，先给他一句能立刻开口的；少讲道理。\n' +
+        '- 如果他本来有底：别过度安慰，直接给更进一步的建议。';
+    }
+
+    /* 「只想说说」：动机式访谈（MI）的基本要求——对方没准备好改变时，不要推方案。
+       对改变准备度高的人硬推建议会干扰效果，所以这条通道必须留着。 */
+    if (mode === 'review' && o.listen) {
+      messages[0].content += '\n\n【本次特别要求：只想说说】' +
+        '\n用户明确说了现在只想找人说说，不想被给建议。' +
+        '\n→ 只做倾听和共情：接住他的感受、用自然语言说清这是什么场景、压力来自哪。' +
+        '\n→ 不要给下一步动作、不要给话术、不要说"下次可以试试"。' +
+        '\n→ review.next 留空字符串。';
+    }
     /* 追问上下文：用户补充的信息要带上，否则"再短一点"这种指令模型看不懂 */
     (Array.isArray(o.context) ? o.context : []).slice(-4).forEach((m) => {
       const content = clampText(m && m.content, 200);
@@ -714,7 +766,7 @@ function createApp(options) {
     messages.push({
       role: 'user',
       content: (mode === 'review' ? '我刚经历的：' : '我的场景：') + text +
-        '\n（画像：' + (tendency === 'i' ? '偏内向' : tendency === 'e' ? '偏外向' : '未设置') + '）'
+        '\n（画像：' + (profileNote || (tendency === 'i' ? '偏内向' : tendency === 'e' ? '偏外向' : '未设置')) + '）'
     });
     const resp = await fetch(llm.endpoint, {
       method: 'POST',
@@ -927,12 +979,14 @@ function createApp(options) {
       const body = await readBody(req, 64 * 1024);
       const text = String(body.text || '').slice(0, 2000);
       const mode = body.mode === 'review' ? 'review' : 'prep';
+      const listen = mode === 'review' && !!body.listen;   // 「只想说说」：只倾听，不给方案
       const context = Array.isArray(body.context) ? body.context.slice(-4) : [];
       if (!text.trim()) { json(res, 400, { error: '内容为空' }); return; }
       if (Engine.safetyCheck(text)) { json(res, 200, { blocks: [Engine.CRISIS_BLOCK], source: 'safety' }); return; }
       try {
         const p = await publicProfile(user.userId);
-        const out = await callLLM(text, p.profile && p.profile.tendency, { mode: mode, context: context });
+        const out = await callLLM(text, p.profile && p.profile.tendency,
+          { mode: mode, context: context, listen: listen, profile: p.profile });
         /* 场景库进化：模型认为现有场景装不下这个情境时，会带回 newScene。
            注意只跟「内置场景」查重：已学过的同名场景要走进"累加使用次数"分支，
            而不是被当成重复而丢掉。 */

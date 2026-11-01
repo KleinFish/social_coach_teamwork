@@ -544,6 +544,38 @@ function startMock(mode) {
     ok('场景名被映射回内置场景 id', r.data.review && r.data.review.sceneId === 'party-strangers', JSON.stringify(r.data.review && r.data.review.sceneId));
     ok('effect 被白名单校验', ['good', 'ok', 'bad'].indexOf(r.data.review.effect) >= 0, r.data.review.effect);
     ok('复盘模式用的是"朋友"提示词', /用户的朋友/.test(startMock.lastBody || ''));
+    /* 理论约束：具体化（Stöber 具体化加工）+ 实施意向（Gollwitzer if-then）+ MI 的改变准备度边界 */
+    const rPrompt = startMock.lastBody || '';
+    ok('提示词要求避开抽象自我评价（反刍陷阱）', /抽象自我评价/.test(rPrompt) && /具体发生了什么/.test(rPrompt));
+    ok('提示词要求给 if-then 形式的下一步', /if-then/.test(rPrompt) && /如果（具体的触发情境）/.test(rPrompt));
+    const listenRes = await V.post('/api/coach', { text: '今天很累，只想说说', mode: 'review', listen: true });
+    ok('「只想说说」会写进系统提示（只要倾听、不给方案）',
+      listenRes.status === 200 && /只想说说/.test(startMock.lastBody || '') &&
+      /不要给下一步动作/.test(startMock.lastBody || ''));
+
+    /* 画像 → 大模型：写一份有短板的画像，看请求里有没有带上 */
+    const dims = {
+      initiating: 40, smalltalk: 45, group: 42, publicspeaking: 18,
+      authority: 50, improvising: 44, recovery: 55, stamina: 46
+    };
+    await V.put('/api/profile', {
+      profile: {
+        tendency: 'i',
+        assessment: { version: 1, at: '2026-10-20T03:00:00.000Z', answered: 24, total: 40, dimensions: dims, readiness: 43, flat: false },
+        reviews: []
+      },
+      baseRevision: 0
+    });
+    await V.post('/api/coach', { mode: 'prep', text: '明天课堂展示，有点紧张' });
+    const withProfile = startMock.lastBody || '';
+    ok('画像摘要进入了请求（自评准备度）', /自评准备度/.test(withProfile), '未带画像');
+    ok('画像里最弱的维度写进了请求', /当众表达/.test(withProfile));
+    ok('预测的吃力场景写进了请求', /课堂展示/.test(withProfile));
+    ok('提示词要求模型别念分数、别说「根据你的测评」',
+      /不要在回复里提分数/.test(withProfile) && /不要念画像/.test(withProfile));
+    ok('画像段也要求按吃力程度调话术', /话术更短/.test(withProfile));
+    await V.post('/api/coach', { text: '今天很累', mode: 'review' });
+    ok('不勾选时不会注入"只想说说"指令', !/只想说说】/.test(startMock.lastBody || ''));
     const prep = await V.post('/api/coach', { text: '明天面试' });
     ok('准备模式用的是"只给话术"提示词', /只给话术/.test(startMock.lastBody || ''));
     ok('准备模式不返回 review 字段', prep.status === 200 && prep.data.review === null, JSON.stringify(prep.data.review));

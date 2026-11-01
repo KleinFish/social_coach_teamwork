@@ -33,7 +33,7 @@
         <h2 id="authTitle">登录 / 注册</h2>
         <button class="btn ghost small" id="authClose" type="button">关闭</button>
       </div>
-      <p class="hint" id="authHint">登录后：复盘会同步到你自己的账号，换设备也能接着用；手机上的语音转写、以及大模型对话也需要登录。</p>
+      <p class="hint" id="authHint">登录之后：复盘跟着你走，换设备也在；手机上的语音和大模型也要登录才能用。</p>
       <form id="cloudForm" class="mt-10">
         <div class="field">
           <label for="cloudUser">昵称</label>
@@ -69,7 +69,7 @@
           <button class="btn" id="sendBtn">发送</button>
         </div>
       </div>
-      <p class="footer-note">准备流程控制在 3 分钟以内 · 30 秒版本 + 可直接念的话</p>
+      <p class="footer-note">门外三分钟，一句能念出口的话</p>
     </section>
 
     <!-- ============ 社交中应急 ============ -->
@@ -79,7 +79,7 @@
           <h2>现在发生了什么</h2>
           <span class="tag">1 次点击给答案</span>
         </div>
-        <p class="hint">选一个最接近的，马上给你一句可以直接念出口的话。</p>
+        <p class="hint">挑一个最像的。我会直接给你能念出口的那几句，不绕弯。</p>
         <div class="sos-grid mt-10" id="sosGrid"></div>
         <div id="sosHintBox"></div>
       </div>
@@ -92,7 +92,7 @@
     <section class="panel" id="panel-review">
       <div class="card">
         <h2>想说说刚才那件事吗</h2>
-        <p class="hint">不用填表。就当跟朋友讲一遍——它会听着，也会帮你把场景和压力来源讲清楚，最后给你一句下次能用的话。说完了，它会自动记一笔到成长档案。</p>
+        <p class="hint">不用填表。就当跟朋友讲一遍——我会听着，也帮你把场景和压力来源理清，最后给一句下次能用的话。说完它会自己记一笔。</p>
       </div>
 
       <div class="chat" id="reviewChat" aria-live="polite"></div>
@@ -107,8 +107,12 @@
           </button>
           <button class="btn" id="reviewSend">发送</button>
         </div>
+        <label class="listen-toggle">
+          <input type="checkbox" id="reviewListen">
+          <span>只想说说，先别给建议</span>
+        </label>
       </div>
-      <p class="footer-note">说的是当时发生了什么、你怎么想的 · 不用组织语言</p>
+      <p class="footer-note">说的是当时发生了什么、你怎么想的 · 不用组织语言 · 想安静讲一会儿就勾上面那项</p>
     </section>
 
     <!-- ============ 社交画像测试 ============ -->
@@ -116,17 +120,21 @@
       <div class="card" id="testIntro">
         <div class="card-title-row">
           <h2>社交画像测试</h2>
-          <span class="tag">40 题 · 约 4 分钟</span>
+          <span class="tag">最少 24 题 · 约 3 分钟</span>
         </div>
-        <p class="hint">按你平时的真实反应作答，不用挑"看起来更好"的选项。测完会给你一份画像，并预测你在哪些场景更顺手、哪些场景更吃力。</p>
+        <p class="hint">按平时的真实反应选就好，不用挑"看起来更好"的那个。做到一半它会开始挑着你最拿不准的地方问——
+          所以我们不再是一口气问 40 题，而是问到你身上大致看得清了，就停下来。</p>
         <ul class="privacy-list">
           <li>八个维度：破冰启动、小范围寒暄、群体融入、当众表达、权威沟通、临场应变、情绪恢复、社交续航</li>
-          <li>题量 40 题（不超过 48 题），5 级自评，每个维度都含反向计分题</li>
+          <li>快速版约 24–32 题（会挑题）；完整版 40 题，适合隔一段时间重测做对比</li>
           <li>结果默认只存在这台设备；登录后随画像一起同步到你的账号</li>
           <li>这是<b>自评预测</b>，不是心理测评，也不做诊断</li>
         </ul>
         <div class="row-between mt-11">
-          <button class="btn" id="testStart">开始测试</button>
+          <div class="quiz-modes" id="quizModes">
+            <button class="btn" id="testStartAdaptive">快速版 · 会挑题</button>
+            <button class="btn ghost small" id="testStartFull">完整版 40 题</button>
+          </div>
           <span class="hint" id="testLastTime"></span>
         </div>
       </div>
@@ -136,6 +144,7 @@
           <div class="quiz-progress"><div class="quiz-progress-bar" id="testBar"></div></div>
           <span class="quiz-count" id="testCount">1 / 5</span>
         </div>
+        <p class="hint" id="testWhy"></p>
         <div id="testQuestions" class="quiz-questions"></div>
         <div class="row-between mt-11">
           <button class="btn ghost small" id="testPrev">上一页</button>
@@ -153,7 +162,7 @@
           <h2>我的社交画像</h2>
           <span class="tag" id="tendencyTag">未设置</span>
         </div>
-        <p class="hint">性格倾向只用于调整建议的语气与节奏，不会强制填写、也不会用于任何评分。</p>
+        <p class="hint">这个只用来调语气和节奏：不填也行，也不参与任何评分。</p>
         <div class="chips mt-8" id="tendencyChips"></div>
       </div>
 
@@ -162,7 +171,7 @@
           <h2>社交画像与场景预测</h2>
           <span class="tag" id="assessTag">未测试</span>
         </div>
-        <p class="hint">来自「测试」标签页的自评结果：哪些维度有底、哪些场景更吃力。</p>
+        <p class="hint">测试给出的自评：哪里你本来就有底，哪里需要借点力。</p>
         <div id="assessBox"></div>
       </div>
 
@@ -171,20 +180,20 @@
           <h2>场景库的自我进化</h2>
           <span class="tag" id="learnedTag">场景库</span>
         </div>
-        <p class="hint">当现有场景装不下你的处境时，它会从对话里学一类新场景——下次遇到同类情境就能直接认出来。</p>
+        <p class="hint">当 13 类场景装不下你的处境，它会从对话里学一类新的——下次遇到同类情境就能认出来。</p>
         <div id="learnedBox"></div>
       </div>
 
       <div class="card">
         <h2>社交能力成长曲线</h2>
-        <p class="hint">焦虑等级按复盘记录绘制，用来看到进步，而不是给你打分。</p>
+        <p class="hint">这条线只用来看看自己有没有往前走，不是分数。</p>
         <div class="chart-box" id="chartBox"></div>
         <div class="stat-grid" id="statGrid"></div>
       </div>
 
       <div class="card">
         <h2>我的策略库</h2>
-        <p class="hint">复盘中标记为"有效"的做法会自动存进来，下次同类场景直接调用。</p>
+        <p class="hint">复盘里标成"有效"的做法会自己存进来，下次同类场景直接递给你。</p>
         <div id="strategyBox"></div>
       </div>
 
@@ -211,7 +220,7 @@
           <h2>云端同步</h2>
           <span class="mode-pill" id="cloudPill">仅本机</span>
         </div>
-        <p class="hint" id="cloudHint">未登录时所有数据只在这台设备上。注册账号后可以把复盘同步到云端，换设备也能接着用。</p>
+        <p class="hint" id="cloudHint">没登录时，所有东西只在这台设备上。登录之后，换设备也能接着用。</p>
 
         <div class="row-between mt-10">
           <button class="btn small" id="cloudOpenAuth" type="button">登录 / 注册</button>
@@ -253,7 +262,11 @@
           服务器未配置或调用失败时，自动使用本地规则引擎，功能不中断。</p>
       </div>
 
-      <p class="footer-note">规则引擎话术为预设内容，不构成心理或医疗建议。</p>
+      <p class="footer-note">
+        这个工具是<b>练习与准备工具</b>，不做心理诊断、不替代专业帮助、也不承诺疗效。<br>
+        如果你持续感到痛苦，或出现伤害自己的念头：请联系学校心理健康中心、当地心理援助热线，或身边信任的人。<br>
+        对话内容只在你同意时同步到你的账号；你可以随时导出或删除全部数据。
+      </p>
     </section>
 
   </main>

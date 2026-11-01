@@ -124,5 +124,71 @@ ok('总结提示了不可靠作答', A.summarize(A.score(answersAt(3))).join('')
 ok('总结与免责声明不含"你应该"',
   (summary.join('') + A.DISCLAIMER).indexOf('你应该') === -1);
 
+/* ------------------------------------------------------------------ *
+ * 自适应选题（分层 / 序贯分配）
+ * ------------------------------------------------------------------ */
+section('自适应选题');
+{
+  const start = A.adaptiveStart();
+  ok('首块 12 题', start.length === 12, String(start.length));
+  const dimsCovered = new Set(start.map((id) => A.ITEMS.filter((i) => i.id === id)[0].dim));
+  ok('首块覆盖全部 8 个维度', dimsCovered.size === 8, String(dimsCovered.size));
+  ok('首块含反向计分题', start.some((id) => A.ITEMS.filter((i) => i.id === id)[0].reverse));
+  ok('首块无重复题', new Set(start).size === start.length);
+
+  /* 一路答 3 分（最模糊）→ 应当每题都问到、也应当能自己停 */
+  let answers = {}, asked = start.slice();
+  start.forEach((id) => { answers[id] = 3; });
+  let block = A.adaptiveNext(answers, asked);
+  let rounds = 0;
+  while (block.length && rounds < 20) {
+    block.forEach((id) => { answers[id] = 3; asked.push(id); });
+    block = A.adaptiveNext(answers, asked);
+    rounds++;
+  }
+  const done = Object.keys(answers).length;
+  ok('答完自动停止', A.shouldStop(answers, asked));
+  ok('总题数落在 24–32 之间', done >= 24 && done <= A.ADAPTIVE.maxTotal, String(done));
+  ok('比完整版 40 题更短', done < A.ITEMS.length, String(done));
+  const st = A.dimStats(answers);
+  ok('停止时每个维度至少 3 题',
+    A.DIMENSIONS.every((d) => st[d.key].n >= A.ADAPTIVE.minPerDim),
+    A.DIMENSIONS.map((d) => st[d.key].n).join(','));
+  ok('自适应结果也能出完整画像',
+    A.score(answers).dimensions && Object.keys(A.score(answers).dimensions).length === 8);
+
+  /* 确定性：同一份作答序列，选题结果必须完全一样 */
+  const again = A.adaptiveNext({ ...answers, i1: undefined }, []);
+  const again2 = A.adaptiveNext({ ...answers, i1: undefined }, []);
+  ok('选题结果确定（两次完全相同）', JSON.stringify(again) === JSON.stringify(again2));
+
+  /* 反向题偏好：其余维度都答满，只留「当众表达」答两道且卡在中间带 */
+  const midAnswers = {};
+  A.DIMENSIONS.forEach((d) => {
+    const pool = A.ITEMS.filter((it) => it.dim === d.key && !it.reverse);
+    if (d.key === 'publicspeaking') {
+      midAnswers[pool[0].id] = 3;
+      midAnswers[pool[1].id] = 3;
+    } else {
+      pool.slice(0, 3).forEach((it) => { midAnswers[it.id] = 4; });
+    }
+  });
+  const midNext = A.adaptiveNext(midAnswers, Object.keys(midAnswers));
+  const midItems = midNext.map((id) => A.ITEMS.filter((i) => i.id === id)[0]);
+  const hasMidReverse = midItems.some((it) => it.dim === 'publicspeaking' && it.reverse);
+  ok('中间值维度会优先补反向题（防一路点同意）', hasMidReverse, JSON.stringify(midItems.map((i) => i.id)));
+
+  /* 进度估算 */
+  const prog = A.adaptiveStatus(answers, asked);
+  ok('进度信息带剩余估算', typeof prog.remainingEstimate === 'number' && prog.remainingEstimate >= 0);
+  ok('进度信息带每维题数', prog.perDim && prog.perDim.initiating && typeof prog.perDim.initiating.n === 'number');
+
+  /* 给大模型的画像摘要 */
+  const brief = A.promptBrief(A.score(answers));
+  ok('画像摘要非空且含准备度', /自评准备度/.test(brief), brief);
+  ok('画像摘要不提分数以外的细节（≤80 字）', brief.length <= 80, String(brief.length));
+  ok('没画像时摘要为空', A.promptBrief(null) === '');
+}
+
 console.log('\n结果：' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

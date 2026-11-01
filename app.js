@@ -30,7 +30,7 @@
     toastTimer = setTimeout(function () { t.classList.remove('show'); }, 1900);
   }
   function copyText(text) {
-    var done = function () { toast('已复制，可以直接念'); };
+    var done = function () { toast('抄好了，念出来就行'); };
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(text).then(done, function () { fallback(); });
     } else { fallback(); }
@@ -41,7 +41,7 @@
       ta.style.opacity = '0';
       document.body.appendChild(ta);
       ta.select();
-      try { document.execCommand('copy'); done(); } catch (e) { toast('复制失败，请手动选中'); }
+      try { document.execCommand('copy'); done(); } catch (e) { toast('没复制上，长按选中一下？'); }
       document.body.removeChild(ta);
     }
   }
@@ -341,7 +341,7 @@
       });
     });
   }
-  function errText(res) { return (res && res.data && res.data.error) || '网络异常，请稍后再试'; }
+  function errText(res) { return (res && res.data && res.data.error) || '网络好像断了，等会儿再试？'; }
 
   // 大模型走服务端代理：API Key 只存在服务器，浏览器拿不到，也没有跨域问题
   // mode: 'prep'（只给话术）/ 'review'（朋友式聊天 + 顺手抽取结构化复盘）
@@ -350,7 +350,12 @@
     if (!cloud.available || !cloud.user || !cloud.llm) return Promise.resolve(null);
     return apiJson('/api/coach', {
       method: 'POST',
-      body: JSON.stringify({ text: text, mode: o.mode || 'prep', context: o.context || [] })
+      body: JSON.stringify({
+        text: text,
+        mode: o.mode || 'prep',
+        listen: !!o.listen,                 // 复盘页「只想说说」：服务端会要求模型只倾听不给方案
+        context: o.context || []
+      })
     }).then(function (res) {
       if (!res.ok || !res.data.blocks) return null;
       return { blocks: res.data.blocks, learned: res.data.learned || null, review: res.data.review || null };
@@ -436,10 +441,10 @@
         store(PROFILE_KEY, profile);
         store(CLOUD_KEY, { autoSync: cloud.autoSync });
       } else if (manual) {
-        toast('同步失败，本地数据未受影响');
+        toast('这次没同步上，东西都还在本机');
       }
       renderMe();
-      if (manual && done) toast('已同步到云端');
+      if (manual && done) toast('同步好了，云端也有一份');
       return done;
     });
   }
@@ -535,7 +540,7 @@
     var modal = $('#authModal');
     if (!modal) return;
     if (cloud.user) { switchTab('me'); return; }   // 已登录：直接看账号与同步
-    if (!cloud.available) { toast('当前是本地文件模式，部署到服务器后即可注册登录'); return; }
+    if (!cloud.available) { toast('现在是从本地文件打开的；放到服务器上就能注册和同步'); return; }
     modal.classList.remove('hidden');
     setTimeout(function () { var u = $('#cloudUser'); if (u && u.focus) u.focus(); }, 30);
   }
@@ -629,11 +634,11 @@
             : '「' + res.learned.name + '」这个场景又用了一次');
           loadLearnedScenes();
         } else {
-          toast('话术已更新，可以照着念；要改就直接说，比如"再短一点"');
+          toast('换了一版。不顺口就直说，比如"再短一点""换个说法"');
         }
       } else {
         show(local.blocks);
-        toast('大模型暂时不可用，已用本地话术库回答');
+        toast('那边暂时没连上，先用本机备好的话术给你');
       }
     });
   }
@@ -695,6 +700,12 @@
     var wrap = el('div');
     renderBlocks(wrap, r.blocks);
     card.appendChild(wrap);
+    /* 注意力外移（Clark & Wells / Spurr & Stopa）：焦虑时注意力锁在自己身上，
+       给一个 5 秒内能做的「往外看」动作，比让他别紧张更有效。 */
+    var anchor = el('div', 'attend-anchor');
+    anchor.appendChild(el('div', 'aa-title', '把注意力放出去（5 秒）'));
+    anchor.appendChild(el('div', 'aa-body', '选一个：找出房间里 3 个蓝色的东西；或者记住对方刚说那句话的最后三个词，用它接下一句。'));
+    card.appendChild(anchor);
     host.appendChild(card);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
@@ -723,7 +734,7 @@
     if (reviewHistory.length) return;          // 已经聊过，不覆盖
     var host = $('#reviewChat');
     if (!host || host.children.length) return;
-    appendMessage(host, 'bot', '刚才那场社交，你是什么感觉？不用组织语言，想到什么说什么就行——我不会让你填表。');
+    appendMessage(host, 'bot', '刚才那场过去了。想从哪儿说起都行，我不打断，也不用填表。');
   }
 
   function reviewTyping(host) {
@@ -775,7 +786,7 @@
       }
     }
 
-    serverCoach(text, { mode: 'review', context: reviewHistory.slice(-4) }).then(function (res) {
+    serverCoach(text, { mode: 'review', listen: listenMode(), context: reviewHistory.slice(-4) }).then(function (res) {
       if (res && res.blocks && res.blocks.length) {
         finish(res.blocks, res.review, 'llm');
         if (res.learned) {
@@ -786,7 +797,7 @@
         }
         return;
       }
-      var local = E.buildReviewReply(text, profile);
+      var local = E.buildReviewReply(text, profile, { listen: listenMode() });
       if (local.crisis) { finish([E.CRISIS_BLOCK], null, 'crisis'); return; }
       finish(local.blocks, null, 'local');
       // 本地模式也给一条可点击的引导，让"记一笔"这条路径不至于断掉
@@ -795,14 +806,20 @@
     });
   }
 
+  /* 「只想说说」：动机式访谈的基本要求——对方没准备好改变时，先别给方案 */
+  function listenMode() {
+    var box = $('#reviewListen');
+    return !!(box && box.checked);
+  }
+
   $('#reviewSend').addEventListener('click', function () { sendReview(); });
   $('#reviewInput').addEventListener('keydown', function (e) {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendReview(); }
   });
 
   /* ---------------- 社交画像测试 ---------------- */
-  var QUIZ_PAGE_SIZE = 8;
-  var quiz = { page: 0, answers: {}, active: false };
+  var QUIZ_PAGE_SIZE = 8;      // 完整版每屏题数
+  var quiz = { page: 0, answers: {}, active: false, mode: 'adaptive', asked: [], block: [], pending: [] };
 
   function assessmentDims() {
     var a = profile.assessment;
@@ -833,31 +850,56 @@
 
   function renderTestPanel() {
     var last = profile.assessment && profile.assessment.at;
-    $('#testLastTime').textContent = last ? ('上次测试：' + new Date(last).toLocaleString('zh-CN')) : '';
+    $('#testLastTime').textContent = last
+      ? ('上次测过：' + new Date(last).toLocaleString('zh-CN') + '　想再确认一次也行')
+      : '';
     if (quiz.active) { showQuizUI(true); renderQuizPage(); return; }
     showQuizUI(false);
     renderTestResult(profile.assessment);
   }
 
-  function startQuiz() {
+  /** mode: 'adaptive'（会挑题）| 'full'（完整 40 题） */
+  function startQuiz(mode) {
     quiz.active = true;
+    quiz.mode = mode === 'full' ? 'full' : 'adaptive';
     quiz.page = 0;
     quiz.answers = {};
+    quiz.asked = [];
+    if (quiz.mode === 'adaptive') {
+      var plan = Assess.adaptiveStart();          // 首阶段 12 题：8 维各一 + 4 道反向题
+      quiz.block = plan.slice(0, Assess.ADAPTIVE.block);
+      quiz.pending = plan.slice(Assess.ADAPTIVE.block);
+      quiz.block.forEach(function (id) { quiz.asked.push(id); });
+    } else {
+      quiz.block = Assess.ITEMS.slice(0, QUIZ_PAGE_SIZE).map(function (it) { return it.id; });
+    }
     showQuizUI(true);
     renderQuizPage();
   }
 
+  function itemById(id) {
+    for (var i = 0; i < Assess.ITEMS.length; i++) if (Assess.ITEMS[i].id === id) return Assess.ITEMS[i];
+    return null;
+  }
+
+  function countAnswered() {
+    return Assess.ITEMS.filter(function (it) { return quiz.answers[it.id]; }).length;
+  }
+
   function renderQuizPage() {
-    var total = Assess.ITEMS.length;
-    var pages = Math.ceil(total / QUIZ_PAGE_SIZE);
-    var start = quiz.page * QUIZ_PAGE_SIZE;
-    var items = Assess.ITEMS.slice(start, start + QUIZ_PAGE_SIZE);
     var host = $('#testQuestions');
     host.innerHTML = '';
-    items.forEach(function (it, idx) {
+    var ids = quiz.mode === 'adaptive'
+      ? quiz.block
+      : Assess.ITEMS.slice(quiz.page * QUIZ_PAGE_SIZE, quiz.page * QUIZ_PAGE_SIZE + QUIZ_PAGE_SIZE).map(function (it) { return it.id; });
+    var base = countAnswered();
+
+    ids.forEach(function (id, idx) {
+      var it = itemById(id);
+      if (!it) return;
       var wrap = el('div', 'q-item');
       var qt = el('div', 'q-text');
-      qt.appendChild(el('span', 'q-no', 'Q' + (start + idx + 1)));
+      qt.appendChild(el('span', 'q-no', 'Q' + (base + idx + 1)));
       qt.appendChild(el('span', null, it.text));
       wrap.appendChild(qt);
       var opts = el('div', 'q-opts');
@@ -869,6 +911,7 @@
           for (var s = 0; s < sibs.length; s++) sibs[s].classList.remove('on');
           b.classList.add('on');
           updateQuizNav();
+          if (quiz.mode === 'adaptive') setTimeout(autoAdvance, 220);   // 选完自动翻下一组
         });
         opts.appendChild(b);
       });
@@ -878,30 +921,83 @@
     updateQuizNav();
   }
 
+  function blockAnswered() {
+    return quiz.block.every(function (id) { return quiz.answers[id]; });
+  }
+
   function updateQuizNav() {
-    var total = Assess.ITEMS.length;
-    var pages = Math.ceil(total / QUIZ_PAGE_SIZE);
+    var answered = countAnswered();
+    var prev = $('#testPrev');
+    var next = $('#testNext');
+    var why = $('#testWhy');
+    if (quiz.mode === 'adaptive') {
+      var st = Assess.adaptiveStatus(quiz.answers, quiz.asked);
+      var stop = (!quiz.pending || !quiz.pending.length) &&
+                 Assess.shouldStop(quiz.answers, quiz.asked) && blockAnswered();
+      $('#testBar').style.width = Math.min(100, Math.round((answered / Assess.ADAPTIVE.maxTotal) * 100)) + '%';
+      $('#testCount').textContent = '已答 ' + answered + ' 题 · 预计还要 ' + st.remainingEstimate + ' 题';
+      if (why) {
+        var need = Assess.DIMENSIONS.map(function (d) { return st.perDim[d.key]; })
+          .sort(function (x, y) { return x.n - y.n; })[0];
+        why.textContent = stop
+          ? '差不多了——八个维度都至少问到了 3 题，再问下去信息也不会多多少。'
+          : (need && need.n < Assess.ADAPTIVE.minPerDim
+            ? '接下来会多问几个你还没答过的维度，好让画像别一边厚一边薄。'
+            : '这几题会挑你答案落在中间、最拿不准的地方问。');
+      }
+      prev.classList.add('hidden');          // 会挑题的版本不回头，避免同一题被重复计分
+      next.textContent = stop ? '就到这里，看结果' : '下一组';
+      next.disabled = !blockAnswered();
+      return;
+    }
+    var pages = Math.ceil(Assess.ITEMS.length / QUIZ_PAGE_SIZE);
     var lastPage = quiz.page >= pages - 1;
-    var pageItems = Assess.ITEMS.slice(quiz.page * QUIZ_PAGE_SIZE, quiz.page * QUIZ_PAGE_SIZE + QUIZ_PAGE_SIZE);
-    var answeredOnPage = pageItems.every(function (it) { return quiz.answers[it.id]; });
+    var pageIds = Assess.ITEMS.slice(quiz.page * QUIZ_PAGE_SIZE, quiz.page * QUIZ_PAGE_SIZE + QUIZ_PAGE_SIZE);
+    var answeredOnPage = pageIds.every(function (it) { return quiz.answers[it.id]; });
     var answeredAll = Assess.ITEMS.every(function (it) { return quiz.answers[it.id]; });
     $('#testBar').style.width = Math.round(((quiz.page + (answeredOnPage ? 1 : 0.5)) / pages) * 100) + '%';
-    $('#testCount').textContent = '第 ' + (quiz.page + 1) + ' / ' + pages + ' 页 · 已答 ' +
-      Assess.ITEMS.filter(function (it) { return quiz.answers[it.id]; }).length + ' / ' + total;
-    $('#testPrev').disabled = quiz.page === 0;
-    $('#testNext').textContent = lastPage ? '提交并生成画像' : '下一页';
-    $('#testNext').disabled = lastPage ? !answeredAll : !answeredOnPage;
+    $('#testCount').textContent = '第 ' + (quiz.page + 1) + ' / ' + pages + ' 页 · 已答 ' + answered + ' / ' + Assess.ITEMS.length;
+    if (why) why.textContent = '完整版会把 40 道题都问一遍，适合隔一段时间重测做对比。';
+    prev.classList.remove('hidden');
+    prev.disabled = quiz.page === 0;
+    next.textContent = lastPage ? '提交并生成画像' : '下一页';
+    next.disabled = lastPage ? !answeredAll : !answeredOnPage;
+  }
+
+  function autoAdvance() {
+    if (!quiz.active) return;
+    if (!blockAnswered()) return;
+    nextBlockOrSubmit();
+  }
+
+  function nextBlockOrSubmit() {
+    if (quiz.mode !== 'adaptive') { submitQuiz(); return; }
+    var next = [];
+    if (quiz.pending && quiz.pending.length) {
+      next = quiz.pending.splice(0, Assess.ADAPTIVE.block);
+    } else {
+      next = Assess.adaptiveNext(quiz.answers, quiz.asked);
+    }
+    if (!next.length) { submitQuiz(); return; }
+    quiz.block = next;
+    next.forEach(function (id) { quiz.asked.push(id); });
+    quiz.page += 1;
+    renderQuizPage();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
   function submitQuiz() {
-    var missing = Assess.ITEMS.filter(function (it) { return !quiz.answers[it.id]; });
-    if (missing.length) {
-      toast('还有 ' + missing.length + ' 题没作答');
-      quiz.page = Math.floor(Assess.ITEMS.indexOf(missing[0]) / QUIZ_PAGE_SIZE);
-      renderQuizPage();
-      return;
+    if (quiz.mode === 'full') {
+      var missing = Assess.ITEMS.filter(function (it) { return !quiz.answers[it.id]; });
+      if (missing.length) {
+        toast('还差 ' + missing.length + ' 题，回头补上也行');
+        quiz.page = Math.floor(Assess.ITEMS.indexOf(missing[0]) / QUIZ_PAGE_SIZE);
+        renderQuizPage();
+        return;
+      }
     }
     var result = Assess.score(quiz.answers, { scenes: E.SCENES });
+    result.mode = quiz.mode;
     quiz.active = false;
     showQuizUI(false);
     saveAssessment(result);
@@ -931,7 +1027,7 @@
     renderMe();
     renderTestPanel();
     scheduleSync();
-    toast('画像已写入%s，之后「准备」和「应急」会按它调整建议'.replace('%s', noted));
+    toast('画像存好了%s。之后「准备」和「应急」会照着它来'.replace('%s', noted));
   }
 
   function dimBar(name, score) {
@@ -1119,7 +1215,7 @@
     next.appendChild(ul);
     var row = el('div', 'row-between mt-10');
     var again = el('button', 'btn ghost small', '重新测试');
-    again.addEventListener('click', function () { startQuiz(); });
+    again.addEventListener('click', function () { startQuiz('adaptive'); });
     var goPrep = el('button', 'btn small', '去准备一个场景');
     goPrep.addEventListener('click', function () { switchTab('prep'); $('#input').focus(); });
     row.appendChild(again); row.appendChild(goPrep);
@@ -1159,18 +1255,21 @@
     if (bad.length) box.appendChild(el('p', 'hint', '预测偏吃力：' + bad.join('、') + '（共 ' + split.challenges.length + ' 个）'));
     var row = el('div', 'row-between mt-10');
     var again = el('button', 'btn ghost small', '重新测试');
-    again.addEventListener('click', function () { switchTab('test'); startQuiz(); });
+    again.addEventListener('click', function () { switchTab('test'); startQuiz('adaptive'); });
     var detail = el('button', 'btn small', '看完整预测');
     detail.addEventListener('click', function () { switchTab('test'); renderTestPanel(); });
     row.appendChild(again); row.appendChild(detail);
     box.appendChild(row);
   }
 
-  $('#testStart').addEventListener('click', function () { startQuiz(); });
+  $('#testStartAdaptive').addEventListener('click', function () { startQuiz('adaptive'); });
+  $('#testStartFull').addEventListener('click', function () { startQuiz('full'); });
   $('#testPrev').addEventListener('click', function () {
+    if (quiz.mode !== 'full') return;                 // 会挑题的版本不回头
     if (quiz.page > 0) { quiz.page -= 1; renderQuizPage(); }
   });
   $('#testNext').addEventListener('click', function () {
+    if (quiz.mode === 'adaptive') { nextBlockOrSubmit(); return; }
     var pages = Math.ceil(Assess.ITEMS.length / QUIZ_PAGE_SIZE);
     if (quiz.page < pages - 1) { quiz.page += 1; renderQuizPage(); return; }
     submitQuiz();
@@ -1235,10 +1334,10 @@
 
     var mode = voiceMode();
     if (mode === 'none') {
-      if (!cloud.available) toast('本地文件模式不支持语音输入，把网站部署到服务器上即可使用');
-      else if (!cloud.user && cloud.asr) toast('语音转写需要先登录：去「档案」页注册一个账号（10 秒），之后微信里也能用语音');
-      else if (!cloud.asr) toast('服务器未配置语音转写，当前浏览器也不支持语音识别，请手动输入');
-      else toast('当前浏览器不支持语音输入，请手动输入');
+      if (!cloud.available) toast('现在没法录音（本地文件模式），放到服务器上就能用');
+      else if (!cloud.user && cloud.asr) toast('语音要先登录一下：右上角「登录 / 注册」，十秒就好');
+      else if (!cloud.asr) toast('这会儿录不了声音，先打字吧');
+      else toast('这个浏览器不支持录音，先打字吧');
       return;
     }
 
@@ -1262,8 +1361,8 @@
         voiceState.session = null;
         setVoiceButton(btn, false);
         showVoiceBar('');
-        if (cleaned) toast('已填入语音内容，可以改一改再提交');
-        else if (!voiceState.errored) toast('没有听到内容，再说一次试试？');
+        if (cleaned) toast('写进去了，看着不顺就改改再发');
+        else if (!voiceState.errored) toast('没听到，再说一次？');
       },
       onError: function (code, message) {
         voiceState.session = null;
@@ -1503,21 +1602,21 @@
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-    toast('已导出到本机下载目录');
+    toast('导出好了，在下载目录里');
   });
   $('#clearBtn').addEventListener('click', function () {
     if (!confirm('清空本机保存的复盘记录与画像？此操作不可撤销。')) return;
     profile = E.createProfile();
     try { localStorage.removeItem(PROFILE_KEY); } catch (e) {}
     renderMe();
-    toast('已清空本机数据');
+    toast('清空了，本机什么也没留下');
   });
 
   /* ---------------- 云端同步交互 ---------------- */
   function authSubmit(path, okMsg) {
     var username = $('#cloudUser').value.trim();
     var password = $('#cloudPass').value;
-    if (!username || !password) { toast('请填写昵称和密码'); return; }
+    if (!username || !password) { toast('昵称和密码都填一下'); return; }
     apiJson(path, { method: 'POST', body: JSON.stringify({ username: username, password: password }) })
       .then(function (res) {
         if (!res.ok) { toast(errText(res)); return; }
@@ -1531,7 +1630,7 @@
         toast(okMsg);
         syncNow(false);
       })
-      .catch(function () { toast('网络异常，请稍后再试'); });
+      .catch(function () { toast('网络好像断了，等会儿再试？'); });
   }
   $('#cloudForm').addEventListener('submit', function (e) {
     e.preventDefault();
@@ -1546,7 +1645,7 @@
       cloud.revision = 0;
       cloud.lastSync = null;
       renderMe();
-      toast('已退出登录，本机数据保留');
+      toast('退出了，本机的东西都还在');
     }).catch(function () { toast('网络异常'); });
   });
   $('#cloudSyncBtn').addEventListener('click', function () { syncNow(true); });
@@ -1563,7 +1662,7 @@
       if (!res.ok) { toast(errText(res)); return; }
       $('#cloudOldPass').value = '';
       $('#cloudNewPass').value = '';
-      toast('密码已更新，其他设备的登录已失效');
+      toast('密码换好了，其他设备要重新登录');
     }).catch(function () { toast('网络异常'); });
   });
   $('#cloudDelete').addEventListener('click', function () {
@@ -1577,7 +1676,7 @@
       cloud.revision = 0;
       cloud.lastSync = null;
       renderMe();
-      toast('账号与云端数据已删除，本机数据仍在');
+      toast('都删掉了，本机的东西还在');
     }).catch(function () { toast('网络异常'); });
   });
 
@@ -1590,7 +1689,7 @@
   function welcome() {
     var box = el('div', 'block');
     box.appendChild(el('div', 'b-title', '先说一句：紧张不是你的问题'));
-    box.appendChild(el('div', 'line', '我是你的社交教练。告诉我待会儿要面对什么场景——几个人、熟不熟、要做什么，我用 30 秒给你状态调整和可以直接念出口的话。'));
+    box.appendChild(el('div', 'line', '我在。说说你待会儿要面对的那件事吧——几个人、熟不熟、要做什么，都行。我陪你把它拆成几句能说出口的话。'));
     box.appendChild(el('div', 'soft-note', '不想打字的话，点输入框上面那排「场景」标签就行，一键开始；现场撑不住就切到「应急」。所有内容只存在你的设备里。'));
     addMessage('assistant', box);
     addMessage('assistant', '比如："8 人聚餐，其中两个不太熟，我有点紧张"。');

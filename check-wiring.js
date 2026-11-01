@@ -149,6 +149,39 @@ report(['state-loggedout', 'state-syncing', 'state-synced', 'state-unsynced'].ev
 report(['state-loggedout', 'state-syncing', 'state-synced', 'state-unsynced'].every((c) => app.indexOf("'" + c + "'") >= 0),
   '四种状态都会在运行时切换（不只写死一个）');
 
+console.log('\n== 2h. 理论依据落到产品 ==');
+report(/抽象自我评价/.test(server) && /具体发生了什么/.test(server),
+  '反刍陷阱：提示词不跟着做抽象自我评价，先把话头拉回具体');
+report(/if-then/.test(server) && /如果（具体的触发情境）/.test(server),
+  '实施意向：下一步用 if-then 格式');
+report(/只想说说/.test(server) && /listen/.test(server) && htmlIds.has('reviewListen'),
+  '动机式访谈：有「只想说说」通道（只倾听不给方案）');
+report(/looksAbstractSelfJudgment/.test(engineSrc) && /那么我就/.test(engineSrc),
+  '本地引擎也实现了具体化 + if-then');
+report(/attend-anchor/.test(app) && /\.attend-anchor/.test(cssSrc),
+  '应急页有「把注意力放出去」的 5 秒动作（自我聚焦注意）');
+report(/不做心理诊断|不替代专业帮助/.test(html) && /心理援助热线/.test(html),
+  '页脚有常驻的伦理声明与求助路径');
+
+console.log('\n== 2i. 自适应测评 + 画像喂给大模型 ==');
+const assessSrc2 = fs.readFileSync(path.join(dir, 'assessment.js'), 'utf8');
+report(/adaptiveStart/.test(assessSrc2) && /adaptiveNext/.test(assessSrc2) && /shouldStop/.test(assessSrc2),
+  '量表实现了自适应选题（分层 / 序贯分配）');
+report(/minPerDim:\s*3/.test(assessSrc2) && /maxTotal:\s*32/.test(assessSrc2),
+  '自适应有明确的量化标准（每维 ≥3 题、总量 ≤32）');
+report(/promptBrief/.test(assessSrc2), '画像能压成一句给模型看的摘要');
+report(/midLow:\s*2\.4/.test(assessSrc2), '中间值会优先补反向题（防一路点同意）');
+report(htmlIds.has('testStartAdaptive') && htmlIds.has('testStartFull'),
+  '测试页给了「快速版 / 完整版」两条入口');
+report(/function nextBlockOrSubmit/.test(app) && /quiz\.pending/.test(app),
+  '前端按块推进自适应题流');
+report(/profileBrief/.test(server) && /profileNote/.test(server), '服务端把画像摘要送进提示词');
+report(/不要在回复里提分数/.test(server) && /不要念画像/.test(server),
+  '提示词要求模型别念分数、别说「根据你的测评」');
+report(!/开始测试<\/button>/.test(html), '旧的单一「开始测试」入口已替换');
+report(/我在。说说你待会儿要面对/.test(app), '准备页欢迎语改成了 INFP 口吻');
+report(/没听到，再说一次/.test(app) && /等会儿再试/.test(app), 'toast 文案更轻、更像人说话');
+
 console.log('\n== 2b. 社交画像测试 ==');
 const assess = require('./assessment.js');
 const assessSrc = fs.readFileSync(path.join(dir, 'assessment.js'), 'utf8');

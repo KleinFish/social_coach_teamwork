@@ -244,6 +244,19 @@ button { cursor: pointer; border: none; background: none; }
   border: 1px solid var(--line); border-radius: 999px; padding: 6px 12px; white-space: nowrap;
 }
 .suggest button:hover { border-color: var(--primary); color: var(--primary); }
+/* 「只想说说」：动机式访谈的基本姿态——对方没准备好时不推方案 */
+.listen-toggle {
+  display: flex; align-items: center; gap: 7px; margin-top: 8px;
+  font-size: 12.5px; color: var(--ink-2); cursor: pointer; user-select: none;
+}
+.listen-toggle input { width: 15px; height: 15px; accent-color: var(--teal); }
+/* 应急页的「注意力外移」锚点：5 秒内能做的往外看动作 */
+.attend-anchor {
+  margin-top: 10px; padding: 10px 12px; border-radius: 12px;
+  background: var(--teal-soft); border: 1px dashed var(--teal);
+}
+.attend-anchor .aa-title { font-size: 12.5px; font-weight: 650; color: var(--teal); margin-bottom: 3px; }
+.attend-anchor .aa-body { font-size: 13px; color: var(--ink-2); line-height: 1.5; }
 /* 备选场景：点一下就能切换，不用再去找别的按钮 */
 .alt-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
 .alt-label { font-size: 12.5px; color: var(--muted); }
@@ -379,6 +392,9 @@ button { cursor: pointer; border: none; background: none; }
   border-radius: 999px; padding: 2px 9px; font-size: 12px; transition: .15s;
 }
 .scene-hint .sh-alt:hover { border-style: solid; border-color: var(--primary); background: var(--primary-soft); }
+
+/* 测试入口：两个模式按钮并排 */
+.quiz-modes { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 
 /* ---------- 语音输入 ---------- */
 /* 所有可点元素：禁止长按选中/复制、禁止 iOS 长按菜单，避免手势被浏览器接管 */

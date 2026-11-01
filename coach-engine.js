@@ -600,9 +600,15 @@
   /**
    * 复盘模块的本地回复（没接大模型 / 未登录时用）：
    * 像朋友那样先接住情绪，然后把「场景判断」和「换个角度解释」讲清楚。
+   *
+   * 理论的三个约束（对应 Clark & Wells 的 PEP、Stöber 的具体化加工、MI 的改变准备度）：
+   *  1) 不复述整段经历（会让人再回放一遍）；
+   *  2) 用户开始做抽象自我评价时，先把话头拉回「具体发生了什么」——抽象评价无法验证，只会加重反刍；
+   *  3) opts.listen 为真时只倾听、不给方案（对方还没准备好改变）。
    */
-  function buildReviewReply(input, profile) {
+  function buildReviewReply(input, profile, opts) {
     var text = String(input || '');
+    var o = opts || {};
     if (safetyCheck(text)) return { blocks: [CRISIS_BLOCK], crisis: true };
     var found = detectScenes(text, 3);
     var scene = found.length ? found[0].scene : getScene('party-strangers');
@@ -624,10 +630,39 @@
       alternatives: found.slice(1).map(function (f) { return f.scene.name; })
     });
     blocks.push({ type: 'reframe', title: '换个说法看这件事', lines: scene.reframe });
+    /* 抽象自我评价（"我是不是很失败""我这个人不行"）→ 拉回具体片段，而不是跟着评价他 */
+    if (looksAbstractSelfJudgment(text)) {
+      blocks.push({
+        type: 'checklist',
+        title: '先别评价自己，说一件具体的事就行',
+        items: [
+          '当时具体发生了什么？几个人、在哪儿？',
+          '你说的那句话是什么？（原话，哪怕只有半句）',
+          '对方当时做了什么反应？'
+        ],
+        hint: '"我是怎样的人"这种问题想不出答案；"那一分钟发生了什么"却能说清——说清了，就没那么可怕了。'
+      });
+    }
+    /* 只想说说：不给方案 */
+    if (!o.listen) {
+      blocks.push({
+        type: 'checklist',
+        title: '下次遇到同类情况，可以试这一句',
+        items: [pressure.level >= 4 ? '如果一开始就紧张，那么我就先说一句"我有点紧张"，把它说出来。'
+                                   : '如果不知道说什么，那么我就接对方最后一句里的一个词。'],
+        hint: '格式是「如果…那么我就…」——比"我要更自信"这种决心更管用，因为它写清了在什么情况下做什么。'
+      });
+    }
     return {
       scene: scene, matched: found.length ? { id: scene.id, name: scene.name, keywords: scene.aliases.filter(function (a) { return norm(text).indexOf(norm(a)) >= 0; }) } : null,
-      pressure: pressure, emotion: emotion, blocks: blocks, crisis: false
+      pressure: pressure, emotion: emotion, blocks: blocks, crisis: false, listen: !!o.listen
     };
+  }
+
+  /* 抽象自我评价：跟随它只会加重反刍，应把话头拉回具体片段 */
+  function looksAbstractSelfJudgment(text) {
+    var t = norm(text);
+    return /我很失败|我真失败|我这个人|我就是不行|我不行|太丢人|很丢人|好蠢|太蠢|很蠢|废物|很差劲|我是不是有问题|我是不是很怪/.test(t);
   }
 
   /**

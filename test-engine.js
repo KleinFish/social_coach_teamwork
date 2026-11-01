@@ -68,6 +68,28 @@ ok('能从自由倾诉里粗抽结构化复盘（离线兜底）',
   guessed.level >= 1 && guessed.level <= 5 && guessed.triggers.length >= 1, JSON.stringify(guessed));
 ok('粗抽的效果判断能识别"还行"', guessed.effect === 'good', guessed.effect);
 
+/* 4c. 理论的三个约束：具体化（Stöber） / if-then（Gollwitzer） / 只想说说（MI） */
+section('复盘的理论约束（反刍·实施意向·改变准备度）');
+const abstractRev = E.buildReviewReply('我这个人是不是很失败，今天一句话都没说出来', null);
+const concreteBlock = abstractRev.blocks.filter((b) => b.type === 'checklist' && /具体/.test(b.title))[0];
+ok('用户做抽象自我评价时，把话头拉回"具体发生了什么"（不跟着评价）',
+  !!concreteBlock && /具体/.test(concreteBlock.items[0]), JSON.stringify(concreteBlock && concreteBlock.title));
+ok('具体化提问要求说原话/对方反应（可观察的行为，而非推测心理）',
+  !!concreteBlock && concreteBlock.items.some((t) => /原话/.test(t)));
+const normalRev = E.buildReviewReply('今天聚餐我基本没说话', null);
+const ifThenBlock = normalRev.blocks.filter((b) => b.type === 'checklist').pop();
+ok('普通复盘给的是 if-then 形式的下一步（实施意向）',
+  !!ifThenBlock && /^如果/.test(ifThenBlock.items[0]) && /那么我就/.test(ifThenBlock.items[0]),
+  JSON.stringify(ifThenBlock && ifThenBlock.items[0]));
+const listenRev = E.buildReviewReply('今天聚餐我基本没说话', null, { listen: true });
+ok('「只想说说」时不给任何方案（没有 if-then 块）',
+  !listenRev.blocks.some((b) => b.type === 'checklist'), JSON.stringify(listenRev.blocks.map((b) => b.type)));
+ok('「只想说说」仍然认真回应（共情 + 场景判断 + 解释）',
+  listenRev.blocks.length >= 3 && listenRev.blocks[0].type === 'say');
+const abstractListen = E.buildReviewReply('我这个人是不是很失败', null, { listen: true });
+ok('「只想说说」仍保留具体化引导（这不是方案，是把话头拉回来）',
+  abstractListen.blocks.some((b) => b.type === 'checklist' && /具体/.test(b.title)));
+
 /* 5. 应急模块：每个话题都要有一句可直接念的话 */
 section('社交中应急模块');
 ok('应急话题 >= 6 个', E.EMERGENCY.length >= 6, String(E.EMERGENCY.length));

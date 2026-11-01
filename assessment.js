@@ -335,6 +335,162 @@
     return out;
   }
 
+  /* ------------------------------------------------------------------ *
+   * 自适应选题（分层 / 序贯分配）
+   *
+   * 说明：这不是 CAT（计算机自适应测验）。CAT 需要每道题的难度与区分度参数，
+   * 那得靠大样本校准；在没有校准之前做 CAT 等于假装精确。
+   * 这里做的是「按维度缺口 + 作答不确定性来分配题目」：
+   *   · 每块 4 题，先补齐最缺题、最拿不准的维度
+   *   · 每维至少 3 题；总量 24–32 题（完整版仍是 40 题）
+   *   · 某维已答均值落在中间带（2.4–3.6）时，优先挑一道反向计分题，防"一路点同意"
+   * 全部是确定性规则，同一份作答序列每次结果一致，方便测试与复现。
+   * ------------------------------------------------------------------ */
+  var ADAPTIVE = {
+    block: 4,          // 每屏几题
+    minPerDim: 3,      // 每维至少几题
+    minTotal: 24,      // 最少总题数
+    maxTotal: 32,      // 最多总题数
+    midLow: 2.4,       // 中间带下界（用于挑反向题）
+    midHigh: 3.6
+  };
+
+  function itemsOfDim(key) {
+    return ITEMS.filter(function (it) { return it.dim === key; });
+  }
+
+  /** 作答统计：每维已答数量与均值（反向题已折算） */
+  function dimStats(answers) {
+    var a = answers || {};
+    var out = {};
+    DIMENSIONS.forEach(function (d) {
+      var sum = 0, n = 0;
+      itemsOfDim(d.key).forEach(function (it) {
+        var v = a[it.id];
+        if (typeof v === 'number' && v >= 1 && v <= 5) {
+          sum += it.reverse ? (6 - v) : v;
+          n += 1;
+        }
+      });
+      out[d.key] = { n: n, mean: n ? sum / n : null };
+    });
+    return out;
+  }
+
+  /** 首块固定 12 题：8 维各一道正向题 + 4 道反向题（覆盖高压力维度） */
+  function adaptiveStart() {
+    var first = [];
+    DIMENSIONS.forEach(function (d) {
+      var normal = itemsOfDim(d.key).filter(function (it) { return !it.reverse; })[0];
+      if (normal) first.push(normal.id);
+    });
+    ['publicspeaking', 'group', 'initiating', 'authority'].forEach(function (k) {
+      var rev = itemsOfDim(k).filter(function (it) { return it.reverse; })[0];
+      if (rev && first.indexOf(rev.id) < 0) first.push(rev.id);
+    });
+    return first.slice(0, 12);
+  }
+
+  /** 已经问过哪些题（含首块与后续块） */
+  function answeredCount(answers) {
+    return ITEMS.filter(function (it) {
+      var v = (answers || {})[it.id];
+      return typeof v === 'number' && v >= 1 && v <= 5;
+    }).length;
+  }
+
+  /** 该不该停 */
+  function shouldStop(answers, asked) {
+    var a = answers || {};
+    var done = answeredCount(a);
+    if (done >= ADAPTIVE.maxTotal) return true;
+    var stats = dimStats(a);
+    var allEnough = DIMENSIONS.every(function (d) { return stats[d.key].n >= ADAPTIVE.minPerDim; });
+    if (allEnough && done >= ADAPTIVE.minTotal) return true;
+    // 题库里没有可问的了（理论上不会发生）
+    var left = ITEMS.filter(function (it) { return !(typeof a[it.id] === 'number'); });
+    return left.length === 0;
+  }
+
+  /**
+   * 下一块题目 id（最多 ADAPTIVE.block 个）。
+   * @returns {Array<string>} 空数组表示应该结束了
+   */
+  function adaptiveNext(answers, asked) {
+    var a = answers || {};
+    var used = {};
+    (asked || []).forEach(function (id) { used[id] = true; });
+    ITEMS.forEach(function (it) { if (typeof a[it.id] === 'number') used[it.id] = true; });
+    if (shouldStop(a, asked)) return [];
+
+    var stats = dimStats(a);
+    var order = DIMENSIONS.map(function (d) {
+      var s = stats[d.key];
+      // 缺题最多的优先；同样缺题时，均值越低（越吃力）越优先；再同则看均值离中间带多近
+      var need = Math.max(0, ADAPTIVE.minPerDim - s.n);
+      var middle = s.mean === null ? 3 : Math.abs(s.mean - 3);
+      return { key: d.key, need: need, mean: s.mean === null ? 3 : s.mean, middle: middle };
+    }).sort(function (x, y) {
+      if (y.need !== x.need) return y.need - x.need;
+      if (x.mean !== y.mean) return x.mean - y.mean;
+      return x.middle - y.middle;
+    });
+
+    var picked = [];
+    var i = 0;
+    var guard = 0;
+    while (picked.length < ADAPTIVE.block && guard < 200) {
+      guard += 1;
+      var target = order[i % order.length];
+      i += 1;
+      var pool = itemsOfDim(target.key).filter(function (it) { return !used[it.id]; });
+      if (!pool.length) continue;
+      var inMiddle = target.mean >= ADAPTIVE.midLow && target.mean <= ADAPTIVE.midHigh;
+      var preferReverse = inMiddle;
+      var chosen = pool.filter(function (it) { return !!it.reverse === preferReverse; })[0] || pool[0];
+      used[chosen.id] = true;
+      picked.push(chosen.id);
+      // 更新该维统计，便于下一块排序
+      target.need = Math.max(0, target.need - 1);
+      if (shouldStop(a, asked)) break;
+    }
+    return picked;
+  }
+
+  /** 进度信息（给 UI 用） */
+  function adaptiveStatus(answers, asked) {
+    var a = answers || {};
+    var done = answeredCount(a);
+    var stats = dimStats(a);
+    var shortest = DIMENSIONS.map(function (d) { return stats[d.key].n; }).sort(function (x, y) { return x - y; })[0];
+    var estimate = Math.max(done, Math.min(ADAPTIVE.maxTotal, ADAPTIVE.minTotal + (ADAPTIVE.minPerDim - shortest) * 2));
+    return {
+      answered: done,
+      minTotal: ADAPTIVE.minTotal,
+      maxTotal: ADAPTIVE.maxTotal,
+      remainingEstimate: Math.max(0, estimate - done),
+      perDim: stats
+    };
+  }
+
+  /** 把画像压成一句给大模型看的摘要（不带分数细节，只讲人话） */
+  function promptBrief(assessment) {
+    if (!assessment || !assessment.dimensions) return '';
+    var r = rankDimensions(assessment.dimensions);
+    var parts = [];
+    if (typeof assessment.readiness === 'number') {
+      parts.push('自评准备度 ' + assessment.readiness + '/100');
+    }
+    if (r.weakest.length) {
+      parts.push('更吃力的是「' + r.weakest.map(function (d) { return d.name; }).join('」「') + '」');
+    }
+    if (r.strongest.length) {
+      parts.push('相对有底的是「' + r.strongest.map(function (d) { return d.name; }).join('」「') + '」');
+    }
+    if (assessment.flat) parts.push('这次作答全选同一档，参考价值有限');
+    return parts.join('；');
+  }
+
   return {
     VERSION: VERSION,
     DIMENSIONS: DIMENSIONS,
@@ -344,6 +500,7 @@
     DIM_TIPS: DIM_TIPS,
     DIM_EMERGENCY: DIM_EMERGENCY,
     DISCLAIMER: DISCLAIMER,
+    ADAPTIVE: ADAPTIVE,
     itemCount: function () { return ITEMS.length; },
     score: score,
     predictScene: predictScene,
@@ -352,6 +509,12 @@
     rankDimensions: rankDimensions,
     recommendEmergency: recommendEmergency,
     summarize: summarize,
-    bandOf: bandOf
+    bandOf: bandOf,
+    adaptiveStart: adaptiveStart,
+    adaptiveNext: adaptiveNext,
+    adaptiveStatus: adaptiveStatus,
+    shouldStop: shouldStop,
+    dimStats: dimStats,
+    promptBrief: promptBrief
   };
 });

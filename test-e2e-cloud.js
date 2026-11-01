@@ -68,7 +68,7 @@ function makeDevice(base, label) {
 
 /** 在指定设备上把 40 题答完（whenWeak 决定的维度给低分，制造可预测的画像） */
 function takeQuiz(device, weakDims) {
-  device.$('testStart').click();
+  device.$('testStartFull').click();   // 完整版 40 题（分页流程稳定，便于断言）
   const pages = Math.ceil(Assess.ITEMS.length / 8);
   for (let page = 0; page < pages; page++) {
     const items = device.$('testQuestions').querySelectorAll('.q-item');

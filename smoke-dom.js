@@ -58,7 +58,7 @@ ok('点页头按钮能打开登录面板', !$('authModal').classList.contains('h
 ok('面板里有昵称/密码/登录/注册',
   !!$('cloudUser') && !!$('cloudPass') && !!$('cloudLogin') && !!$('cloudRegister'));
 ok('面板里有说明（登录能同步 + 手机语音/大模型需要登录）',
-  /登录后：复盘会同步/.test(html) && /语音转写/.test(html) && /大模型对话也需要登录/.test(html));
+  /登录之后：复盘跟着你走/.test(html) && /语音/.test(html) && /大模型也要登录/.test(html));
 $('authClose').click();
 ok('可以关掉面板', $('authModal').classList.contains('hidden'));
 $('authBtn').click();
@@ -87,6 +87,10 @@ section('社交中应急');
 $('sosGrid').childNodes[3].click();
 const bigSay = $('sosResult').querySelectorAll('.big-say');
 ok('应急页给出可直接念的一句话', bigSay.length === 1 && bigSay[0].textContent.length > 0, bigSay[0] && bigSay[0].textContent);
+/* 注意力外移（Clark & Wells / Spurr & Stopa）：应急时给一个"往外看"的具体动作 */
+const anchorEl = $('sosResult').querySelectorAll('.attend-anchor');
+ok('应急结果里有「把注意力放出去」的 5 秒动作', anchorEl.length === 1, '数量 ' + anchorEl.length);
+ok('这个动作是可执行的（找出/记住…）', /找出|记住/.test($('sosResult').textContent));
 
 section('社交后复盘（像朋友一样聊天，不填表）');
 ok('复盘页是聊天界面（有输入框与发送）', !!$('reviewChat') && !!$('reviewInput') && !!$('reviewSend'));
@@ -94,6 +98,7 @@ ok('复盘页已没有填表字段', !$('rvScene') && !$('rvLevel') && !$('revie
 ok('首次进入有一条引导语', $('reviewChat').childNodes.length >= 1, String($('reviewChat').childNodes.length));
 ok('复盘页有可点的倾诉示例', $('reviewSuggest').childNodes.length >= 1, String($('reviewSuggest').childNodes.length));
 ok('复盘不再有"完成复盘/填示例"这类表单按钮', !$('rvDemo'));
+ok('复盘页有「只想说说」开关（动机式访谈：没准备好时不推方案）', !!$('reviewListen'));
 
 section('成长档案');
 $('tendencyChips').childNodes[0].click();
@@ -109,9 +114,11 @@ ok('登录表单可见（等有网时可用）', !$('cloudForm').classList.conta
 ok('登录区块保持隐藏', $('cloudSignedIn').classList.contains('hidden'));
 ok('大模型标签回落到本地引擎', /未配置|离线/.test($('llmPill').textContent), $('llmPill').textContent);
 
-section('社交画像测试（40 题全流程）');
+section('社交画像测试（完整版 40 题全流程）');
 ok('初始显示测试说明', !$('testIntro').classList.contains('hidden') && $('testQuiz').classList.contains('hidden'));
-$('testStart').click();
+ok('入口有「快速版」和「完整版」两个模式',
+  !!$('testStartAdaptive') && !!$('testStartFull'));
+$('testStartFull').click();
 ok('点开始后进入答题页', !$('testQuiz').classList.contains('hidden') && $('testIntro').classList.contains('hidden'));
 ok('第一页渲染 8 道题', $('testQuestions').querySelectorAll('.q-item').length === 8,
   String($('testQuestions').querySelectorAll('.q-item').length));
@@ -389,6 +396,7 @@ FakeSRFailFast.count = 0;
   const rvAll = textOf(rvHost);
   ok('复盘回复里有场景判断（显示场景与压力）', /场景：/.test(rvAll) && /\/5/.test(rvAll), rvAll.slice(0, 100));
   ok('复盘回复里有换个角度的解释', rvAll.length > 40, rvAll.slice(0, 100));
+  ok('本地复盘结尾给的是 if-then 形式的下一步（实施意向）', /如果.*那么我就/.test(rvAll), rvAll.slice(-70));
   const alts = rvHost.querySelectorAll('.alt-btn');
   ok('备选场景渲染成了可点按钮', alts.length >= 1, '按钮数 ' + alts.length);
   ok('页面上不再出现"场景按钮"这种找不到的措辞', rvAll.indexOf('场景按钮') === -1);
@@ -440,6 +448,41 @@ FakeSRFailFast.count = 0;
   const learnedReply = textOf($l('chat').childNodes[$l('chat').childNodes.length - 1]);
   ok('**学到的场景能被本地识别并给出它自己的话术**',
     learnedReply.indexOf('你也这么晚啊') >= 0, learnedReply.slice(0, 90));
+
+/* ---------- 场景九：自适应测评（快速版会挑题、也会自己停） ---------- */
+console.log('\n【场景九】自适应测评');
+{
+  const qbox = boot({ fetch: () => Promise.reject(new Error('offline')) });
+  const $q = (id) => qbox.byId[id];
+  ok('入口分「快速版」与「完整版」两条', !!$q('testStartAdaptive') && !!$q('testStartFull'));
+  $q('testStartAdaptive').click();
+  ok('快速版首屏 4 题（不再是 8 题一屏）',
+    $q('testQuestions').querySelectorAll('.q-item').length === 4,
+    String($q('testQuestions').querySelectorAll('.q-item').length));
+  ok('进度文案说明会挑题（含「预计还要」）', /预计还要/.test($q('testCount').textContent), $q('testCount').textContent);
+  ok('会挑题的版本不提供「上一页」（避免同一题重复计分）',
+    $q('testPrev').classList.contains('hidden'));
+
+  let rounds = 0;
+  while (rounds < 12 && !$q('testQuiz').classList.contains('hidden')) {
+    const items = $q('testQuestions').querySelectorAll('.q-item');
+    if (!items.length) break;
+    items.forEach((node) => { node.querySelectorAll('.q-opt')[4].click(); });   // 全选「完全符合」
+    $q('testNext').click();
+    rounds += 1;
+    await sleep(30);
+  }
+  ok('快速版会自己停下来（不需要点满 40 题）', $q('testQuiz').classList.contains('hidden'), '轮数 ' + rounds);
+  const qProf = JSON.parse(qbox.storage.get('social-coach.profile.v1'));
+  ok('答完写入画像（8 个维度齐全）',
+    !!(qProf.assessment && qProf.assessment.dimensions &&
+       Object.keys(qProf.assessment.dimensions).length === 8),
+    JSON.stringify(qProf.assessment && Object.keys(qProf.assessment.dimensions || {})));
+  ok('实际题数在 24–32 之间', qProf.assessment.answered >= 24 && qProf.assessment.answered <= 32,
+    String(qProf.assessment && qProf.assessment.answered));
+  ok('比完整版更省题', qProf.assessment.answered < Assess.ITEMS.length, String(qProf.assessment.answered));
+  ok('结果区渲染出来了', $q('testResult').childNodes.length >= 3);
+}
 
   console.log('\n结果：' + pass + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
