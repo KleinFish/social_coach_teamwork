@@ -468,7 +468,9 @@ const LLM_PREP_PROMPT = [
   '',
   '【关于 newScene（场景库进化）】',
   '- 只有当用户描述的情境**无法归入**下面「已有场景」中任何一类时，才返回 newScene。',
-  '- 能覆盖就返回 null。aliases 写用户日常会说的词，不要写成长句。',
+  '- 能覆盖就返回 null。',
+  '- newScene 会进入**公共场景库**，所以：不要复述用户原话，不要出现人名、时间、地点、数字；',
+  '- name 用通用说法，aliases 给 3–6 个 2–6 字的**通用叫法**（不要写用户日常口语、不要带「我/昨天」）。',
   '{"name":"阶段+情境，≤10字","level":1-5,"aliases":["3-6个词，每个≤6字"],"stressor":"≤24字",',
   '"reframe":["≤32字"],"scripts":{"open":["≤32字"],"sustain":["≤32字"],"exit":["≤32字"]},"checklist":["≤24字"]}',
   '',
@@ -509,6 +511,9 @@ const LLM_REVIEW_PROMPT = [
   '',
   '【关于 review】这一段是给成长档案用的，用户看不到，请如实概括；听不出就留空字符串。',
   '【关于 newScene】只有完全装不进「已有场景」时才返回，否则 null。',
+  '  newScene 会进入公共场景库，所以：不要复述用户原话，不要出现人名、时间、地点、数字；',
+  '  name 用通用说法（如「被临时点名发言」），aliases 给 1–5 个 2–6 字的通用叫法（如「临时发言」）；',
+  '  只要有一处可能认出是「谁的哪件事」，就返回 null。',
   '',
   '【已有场景】',
   '${SCENE_LIST}'
@@ -801,6 +806,66 @@ function createApp(options) {
   }
 
   /* ---------------- 学习到的场景：校验（宁可拒绝，也不要污染场景库） ---------------- */
+
+  /* ------------------------------------------------------------------ *
+   * 场景骨架化（隐私）：学到的场景会进**公共库**，所以只留通用信息。
+   *   · 别名：2–6 字、不含数字/英文/第一人称/时间词/地点细节——宁可少认，不可泄露
+   *   · stressor / reframe：出现个人信息迹象就换成通用表述
+   *   · scripts / checklist：是通用建议，保留（离线也能用）
+   * ------------------------------------------------------------------ */
+  const PERSONAL_HINT = /(我|俺|咱|你|他|她|咱家|上次|昨天|前天|今天|明天|上周|下周|那天|那天我|我的)/;
+  const DIGIT_HINT = /[0-9０-９]|[A-Za-z]{2,}/;
+
+  function genericAlias(t) {
+    const v = String(t || '').replace(/[\s，。！？、,.!?]/g, '');
+    if (v.length < 2 || v.length > 6) return '';
+    if (DIGIT_HINT.test(v)) return '';          // 带数字/英文的多半是具体事件
+    if (PERSONAL_HINT.test(v)) return '';        // 带人称的多半是个人经历
+    return v;
+  }
+
+  function skeletonText(t, name) {
+    const v = clampText(t, 60);
+    if (!v) return '';
+    if (PERSONAL_HINT.test(v) || DIGIT_HINT.test(v)) {
+      return '这类场景通常卡在「' + name + '」里的评价压力与被看见的感觉。';
+    }
+    return v;
+  }
+
+  function skeletonizeLearned(doc) {
+    const aliases = uniqBy((doc.aliases || []).map(genericAlias).filter(Boolean)).slice(0, 5);
+    if (!aliases.length) return { ok: false, errors: ['别名全部含个人信息，已丢弃（无法稳定识别）'] };
+    const reframe = (doc.reframe || []).map((t) => skeletonText(t, doc.name)).filter(Boolean).slice(0, 3);
+    const stressor = skeletonText(doc.stressor, doc.name);
+    const scripts = {};
+    ['open', 'sustain', 'shift', 'exit'].forEach((k) => {
+      scripts[k] = ((doc.scripts && doc.scripts[k]) || []).map((t) => clampText(t, 60)).filter(Boolean);
+    });
+    const checklist = (doc.checklist || []).map((t) => clampText(t, 60)).filter(Boolean).slice(0, 4);
+    if (!reframe.length || !scripts.open || !scripts.open.length) {
+      return { ok: false, errors: ['骨架化后内容不足，已丢弃'] };
+    }
+    return {
+      ok: true,
+      doc: {
+        id: doc.id, name: doc.name, level: doc.level, aliases: aliases, stressor: stressor || '',
+        reframe: reframe, scripts: scripts, checklist: checklist, learned: true, source: 'llm'
+      }
+    };
+  }
+
+  /** 简易去重（别名可能重复） */
+  function uniqBy(arr) {
+    const seen = {};
+    return arr.filter((x) => {
+      const k = String(x).toLowerCase();
+      if (seen[k]) return false;
+      seen[k] = 1;
+      return true;
+    });
+  }
+
   function validateLearnedScene(raw, existingNames) {
     const errors = [];
     if (!raw || typeof raw !== 'object') return { ok: false, errors: ['不是对象'] };
@@ -839,15 +904,12 @@ function createApp(options) {
     if (errors.length) return { ok: false, errors: errors };
     const normName = flat(name);
     const id = 'learned-' + crypto.createHash('sha256').update(normName).digest('hex').slice(0, 10);
-    return {
-      ok: true,
-      id: id,
-      doc: {
-        id: id, name: name, level: level, aliases: aliases, stressor: stressor, reframe: reframe,
-        scripts: { open: open, sustain: sustain, shift: shift, exit: exit },
-        checklist: checklist, learned: true, source: 'llm'
-      }
-    };
+    const skeleton = skeletonizeLearned({
+      id: id, name: name, level: level, aliases: aliases, stressor: stressor, reframe: reframe,
+      scripts: { open: open, sustain: sustain, shift: shift, exit: exit }, checklist: checklist
+    });
+    if (!skeleton.ok) return { ok: false, errors: skeleton.errors };
+    return { ok: true, id: skeleton.doc.id, doc: skeleton.doc };
   }
   async function handleApi(req, res, pathname) {
     const method = req.method.toUpperCase();
